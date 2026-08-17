@@ -1,0 +1,10 @@
+# This file applies to the frontend build context in compose.yaml.
+node_modules/
+dist/
+.env
+.env.*
+.git/
+*.log
+coverage/
+.vite/
+

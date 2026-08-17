@@ -1,0 +1,29 @@
+# This file applies to the repository-root backend build context in compose.yaml.
+# Keep backend/ and ml/ source available to backend/Dockerfile.
+.git/
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.py[cod]
+*.egg-info/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+**/*.py[cod]
+**/*.egg-info/
+**/node_modules/
+**/dist/
+
+# The frontend is built from its own context and is not needed by the backend.
+frontend/
