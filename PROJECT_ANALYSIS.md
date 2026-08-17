@@ -168,4 +168,45 @@ the backend mapping at 8000:8000. The complete three-service stack is running:
 PostgreSQL is healthy, the backend health endpoint returns HTTP 200, and the
 frontend returns HTTP 200 at `http://localhost:4173`. Backend tests, Ruff,
 strict mypy, and the frontend production build all pass. Stage 1 is **PASS**.
-See `STAGE_1_VERIFICATION.md` for command-level evidence. Stage 2 has not begun.
+See `STAGE_1_VERIFICATION.md` for command-level evidence. At the Stage 1
+checkpoint, Stage 2 had not begun.
+
+## Stage 2 — Persistence and identity
+
+### Implemented architecture
+
+Stage 2 adds a synchronous SQLAlchemy 2 session foundation, typed UUID models,
+Alembic migration authority, repositories, identity services, and thin FastAPI
+routes. The schema contains users, roles, permissions, user-role links,
+role-permission links, and append-oriented audit events. It deliberately adds no
+accounting, reporting, or ML tables.
+
+Passwords use Argon2id. JWT access tokens use the configured HMAC algorithm,
+secret, and lifetime. Public registration is fixed to VIEWER and rejects extra
+role input. Authorization resolves database permissions inherited across all
+roles through centralized FastAPI dependencies. Registration and login
+success/failure create audit events, while audit metadata rejects sensitive-key
+payloads.
+
+Compose runs Alembic and idempotent RBAC bootstrap as an explicit development
+startup command; the backend image default starts only Uvicorn. Optional admin
+bootstrap requires paired environment credentials and has no hardcoded default.
+
+### Stage 2 status
+
+Stage 2 is **PASS**. Verification completed on Python 3.12 and PostgreSQL 16:
+
+- 25 backend tests passed with 94% application coverage;
+- Ruff passed;
+- strict mypy passed across 38 source files;
+- frontend TypeScript/Vite production build passed;
+- isolated PostgreSQL migration upgrade/downgrade/upgrade passed;
+- PostgreSQL constraints, timezone-aware timestamps, RBAC bootstrap, and model
+  schema alignment passed;
+- registration, login, `/auth/me`, 401, 403, safe serialization, and audit
+  persistence passed;
+- final Compose rebuild has all three services running, PostgreSQL/backend
+  healthy, backend HTTP 200 on port 8000, and frontend HTTP 200 on port 4173.
+
+Detailed implementation, security decisions, tests, and limitations are in
+`STAGE_2_IMPLEMENTATION.md`. Stage 3 has not started.
