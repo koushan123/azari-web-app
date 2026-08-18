@@ -77,8 +77,11 @@ Executed gates:
 - Alembic drift check: no new upgrade operations detected;
 - live API: registration, login, `/auth/me`, safe response fields, 401, 403,
   failed-login auditing, health, and OpenAPI route presence verified;
-- final Compose rebuild: PostgreSQL healthy, backend healthy on 8000, frontend
-  reachable on 4173, and all three services running.
+- final Compose rebuild: PostgreSQL healthy, backend healthy on host port 8100
+  mapped to container port 8000, frontend reachable on host port 4173 mapped to
+  container port 80, and all three services running;
+- host endpoint checks: `/api/v1/health` returned HTTP 200 through port 8100 and
+  the frontend returned HTTP 200 through port 4173.
 
 The dedicated `azari_stage2_test` database was removed after verification. It
 contained only disposable migration-test data.
@@ -98,5 +101,6 @@ contained only disposable migration-test data.
 
 ## Result
 
-Stage 2 is **PASS**. Stage 3 has not started.
-
+Stage 2 is **PASS**. The host-port adjustment was reverified on 2026-08-18 with
+the full Compose stack, backend tests, Ruff, strict mypy, and the frontend
+production build. Stage 3 has not started.

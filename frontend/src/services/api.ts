@@ -4,7 +4,7 @@ export interface HealthResponse {
   timestamp: string;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
+const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8100/api/v1";
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   const response = await fetch(`${apiUrl}/health`, { signal });
@@ -13,4 +13,3 @@ export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   }
   return (await response.json()) as HealthResponse;
 }
-

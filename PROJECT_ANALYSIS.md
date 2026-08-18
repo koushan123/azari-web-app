@@ -115,6 +115,10 @@ generated with behavioral profiles and temporal patterns.
 - **Host port reservation (resolved):** Windows excludes TCP ports 5141-5240,
   including attempted frontend ports 5173 and 5174. The approved host port 4173
   is outside that range and the complete Compose stack is verified running.
+- **Backend host port reservation (resolved):** Windows also excludes TCP ports
+  7927-8026, including host port 8000. Compose publishes backend container port
+  8000 on host port 8100; the container and its internal healthcheck continue to
+  use port 8000.
 
 ## Assumptions
 
@@ -163,10 +167,11 @@ skeleton, and quality-tool configuration. Backend tests/lint/type checks and the
 frontend production build pass. Docker installation and Compose configuration
 are verified. After adding context-specific Docker ignore rules, both images
 build successfully and the backend health endpoint returns HTTP 200. Compose
-correctly renders frontend host port 4173 targeting container port 80 and keeps
-the backend mapping at 8000:8000. The complete three-service stack is running:
-PostgreSQL is healthy, the backend health endpoint returns HTTP 200, and the
-frontend returns HTTP 200 at `http://localhost:4173`. Backend tests, Ruff,
+correctly renders frontend host port 4173 targeting container port 80. The
+Stage 1 backend mapping was 8000:8000; it was later adjusted during Stage 2 to
+8100:8000 because Windows reserves host port 8000. The complete three-service
+stack is running: PostgreSQL is healthy, the backend health endpoint returns
+HTTP 200, and the frontend returns HTTP 200 at `http://localhost:4173`. Backend tests, Ruff,
 strict mypy, and the frontend production build all pass. Stage 1 is **PASS**.
 See `STAGE_1_VERIFICATION.md` for command-level evidence. At the Stage 1
 checkpoint, Stage 2 had not begun.
@@ -206,7 +211,8 @@ Stage 2 is **PASS**. Verification completed on Python 3.12 and PostgreSQL 16:
 - registration, login, `/auth/me`, 401, 403, safe serialization, and audit
   persistence passed;
 - final Compose rebuild has all three services running, PostgreSQL/backend
-  healthy, backend HTTP 200 on port 8000, and frontend HTTP 200 on port 4173.
+  healthy, backend HTTP 200 on host port 8100 (container port 8000), and
+  frontend HTTP 200 on host port 4173.
 
 Detailed implementation, security decisions, tests, and limitations are in
 `STAGE_2_IMPLEMENTATION.md`. Stage 3 has not started.

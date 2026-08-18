@@ -1,7 +1,10 @@
+from typing import cast
+
 from backend.app.core.passwords import hash_password
 from backend.app.db.database import SessionLocal
 from backend.app.db.models import AuditEvent, Role, User
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select
 
 REGISTER_PAYLOAD = {
@@ -12,15 +15,18 @@ REGISTER_PAYLOAD = {
 }
 
 
-def register(client: TestClient, **overrides: object):
+def register(client: TestClient, **overrides: object) -> Response:
     payload = {**REGISTER_PAYLOAD, **overrides}
-    return client.post("/api/v1/auth/register", json=payload)
+    return cast(Response, client.post("/api/v1/auth/register", json=payload))
 
 
 def login(
     client: TestClient, email: str = "alice@example.com", password: str = "a-secure-password-123"
-):
-    return client.post("/api/v1/auth/login", json={"email": email, "password": password})
+) -> Response:
+    return cast(
+        Response,
+        client.post("/api/v1/auth/login", json={"email": email, "password": password}),
+    )
 
 
 def test_registration_normalizes_email_assigns_viewer_and_hides_password(

@@ -28,7 +28,7 @@ services:
     volumes:
       - ./ml/models:/app/ml/models
     ports:
-      - "8000:8000"
+      - "8100:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=2)"]
       interval: 5s
@@ -42,7 +42,7 @@ services:
     build:
       context: frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8100/api/v1}
     ports:
       - "4173:80"
     depends_on:

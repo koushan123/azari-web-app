@@ -42,7 +42,7 @@ Run tests with:
 ## Frontend without Docker
 
 From `frontend/`, run `npm.cmd install` and `npm.cmd run dev` on Windows. The
-frontend reads `VITE_API_URL`; its default is `http://localhost:8000/api/v1`.
+frontend reads `VITE_API_URL`; its default is `http://localhost:8100/api/v1`.
 
 ## Required secrets
 

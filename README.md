@@ -15,7 +15,7 @@ and roadmap.
 1. Copy `.env.example` to `.env` and replace every `change-me` value.
 2. With Docker installed, run `docker compose up --build`.
 3. Open the frontend at `http://localhost:4173` and API documentation at
-   `http://localhost:8000/docs`.
+   `http://localhost:8100/docs`.
 
 Local backend and frontend setup is documented in [docs/SETUP.md](docs/SETUP.md).
 
