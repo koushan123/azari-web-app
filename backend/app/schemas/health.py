@@ -8,4 +8,3 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     service: str
     timestamp: datetime
-

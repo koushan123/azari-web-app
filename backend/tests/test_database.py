@@ -26,7 +26,9 @@ def test_rbac_bootstrap_is_idempotent() -> None:
         seed_rbac(session)
         seed_rbac(session)
         assert len(session.scalars(select(Role)).all()) == 4
-        assert len(session.scalars(select(Permission)).all()) == 9
+        from backend.app.db.bootstrap import PERMISSIONS
+
+        assert len(session.scalars(select(Permission)).all()) == len(PERMISSIONS)
 
 
 def test_role_name_database_uniqueness() -> None:

@@ -39,6 +39,16 @@ Run tests with:
 .venv/Scripts/pytest backend/tests
 ```
 
+Stage 3 PostgreSQL verification must target a disposable database named exactly
+`azari_stage3_test`. Apply migrations to it, run
+`python -m backend.scripts.verify_stage3_postgres`, and remove it afterward.
+The script refuses to run against any other database name.
+
+Stage 4 PostgreSQL report verification similarly requires a disposable database
+named `azari_stage4_test` and runs with
+`python -m backend.scripts.verify_stage4_postgres`. Remove the database after
+the check; the script refuses any other database name.
+
 ## Frontend without Docker
 
 From `frontend/`, run `npm.cmd install` and `npm.cmd run dev` on Windows. The

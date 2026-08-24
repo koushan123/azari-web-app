@@ -16,13 +16,53 @@ PERMISSIONS = {
     "reports:read": "View financial reports",
     "ml:read": "View machine-learning results",
     "ml:train": "Train machine-learning models",
+    "parties:read": "View parties",
+    "parties:write": "Create and update parties",
+    "products:read": "View products",
+    "products:write": "Create and update products",
+    "accounts:read": "View the chart of accounts",
+    "accounts:write": "Maintain the chart of accounts",
+    "journals:read": "View journal entries",
+    "journals:write": "Create draft journal entries",
+    "journals:post": "Post and reverse journal entries",
+    "invoices:read": "View invoices",
+    "invoices:write": "Create invoices",
+    "invoices:issue": "Issue invoices to the ledger",
+    "payments:read": "View payments",
+    "payments:write": "Create payments and allocations",
+    "payments:post": "Post payments to the ledger",
+    "periods:read": "View financial periods",
+    "periods:manage": "Create and close financial periods",
+}
+
+ACCOUNTING_READ = {
+    "parties:read",
+    "products:read",
+    "accounts:read",
+    "journals:read",
+    "invoices:read",
+    "payments:read",
+    "periods:read",
+}
+ACCOUNTING_WRITE = ACCOUNTING_READ | {
+    "parties:write",
+    "products:write",
+    "accounts:write",
+    "journals:write",
+    "journals:post",
+    "invoices:write",
+    "invoices:issue",
+    "payments:write",
+    "payments:post",
+    "periods:manage",
 }
 
 ROLE_PERMISSIONS = {
     "ADMIN": set(PERMISSIONS),
-    "ACCOUNTANT": {"accounting:read", "accounting:write", "reports:read", "ml:read"},
-    "MANAGER": {"users:read", "accounting:read", "reports:read", "ml:read"},
-    "VIEWER": {"accounting:read", "reports:read", "ml:read"},
+    "ACCOUNTANT": {"accounting:read", "accounting:write", "reports:read", "ml:read"}
+    | ACCOUNTING_WRITE,
+    "MANAGER": {"users:read", "accounting:read", "reports:read", "ml:read"} | ACCOUNTING_READ,
+    "VIEWER": {"accounting:read", "reports:read", "ml:read"} | ACCOUNTING_READ,
 }
 
 ROLE_DESCRIPTIONS = {

@@ -1,0 +1,237 @@
+from datetime import date, datetime
+from decimal import Decimal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PartyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=50)
+    address: str | None = None
+    is_customer: bool = False
+    is_supplier: bool = False
+
+
+class PartyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=50)
+    address: str | None = None
+    is_customer: bool | None = None
+    is_supplier: bool | None = None
+    is_active: bool | None = None
+
+
+class PartyRead(ORMModel):
+    id: UUID
+    name: str
+    email: str | None
+    phone: str | None
+    address: str | None
+    is_customer: bool
+    is_supplier: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProductCreate(BaseModel):
+    sku: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    unit: str = Field(default="each", min_length=1, max_length=30)
+    unit_price: Decimal = Field(ge=0, max_digits=18, decimal_places=2)
+
+
+class ProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    unit: str | None = Field(default=None, min_length=1, max_length=30)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    is_active: bool | None = None
+
+
+class ProductRead(ORMModel):
+    id: UUID
+    sku: str
+    name: str
+    description: str | None
+    unit: str
+    unit_price: Decimal
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    account_type: str = Field(pattern="^(ASSET|LIABILITY|EQUITY|REVENUE|EXPENSE)$")
+
+
+class CategoryRead(ORMModel):
+    id: UUID
+    name: str
+    account_type: str
+
+
+class AccountCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=200)
+    category_id: UUID
+    parent_id: UUID | None = None
+
+
+class AccountUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    category_id: UUID | None = None
+    parent_id: UUID | None = None
+    is_active: bool | None = None
+
+
+class AccountRead(ORMModel):
+    id: UUID
+    code: str
+    name: str
+    category_id: UUID
+    parent_id: UUID | None
+    is_active: bool
+
+
+class PeriodCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    start_date: date
+    end_date: date
+
+
+class PeriodRead(ORMModel):
+    id: UUID
+    name: str
+    start_date: date
+    end_date: date
+    status: str
+
+
+class JournalLineCreate(BaseModel):
+    account_id: UUID
+    description: str | None = Field(default=None, max_length=500)
+    debit: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
+    credit: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
+
+
+class JournalCreate(BaseModel):
+    entry_number: str = Field(min_length=1, max_length=80)
+    entry_date: date
+    description: str = Field(min_length=1, max_length=500)
+    period_id: UUID
+    lines: list[JournalLineCreate] = Field(min_length=1)
+
+
+class JournalLineRead(ORMModel):
+    id: UUID
+    account_id: UUID
+    description: str | None
+    debit: Decimal
+    credit: Decimal
+
+
+class JournalRead(ORMModel):
+    id: UUID
+    entry_number: str
+    entry_date: date
+    description: str
+    period_id: UUID
+    status: str
+    reversal_of_id: UUID | None
+    lines: list[JournalLineRead]
+
+
+class InvoiceItemCreate(BaseModel):
+    product_id: UUID | None = None
+    description: str = Field(min_length=1, max_length=500)
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    tax: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
+
+
+class InvoiceCreate(BaseModel):
+    invoice_number: str = Field(min_length=1, max_length=80)
+    customer_id: UUID
+    issue_date: date
+    due_date: date
+    items: list[InvoiceItemCreate] = Field(min_length=1)
+
+
+class InvoiceItemRead(ORMModel):
+    id: UUID
+    product_id: UUID | None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    tax: Decimal
+    line_subtotal: Decimal
+    line_total: Decimal
+
+
+class InvoiceRead(ORMModel):
+    id: UUID
+    invoice_number: str
+    customer_id: UUID
+    issue_date: date
+    due_date: date
+    status: str
+    subtotal: Decimal
+    tax: Decimal
+    total: Decimal
+    amount_paid: Decimal
+    journal_id: UUID | None
+    items: list[InvoiceItemRead]
+
+    balance_due: Decimal
+
+
+class InvoiceIssue(BaseModel):
+    receivable_account_id: UUID
+    revenue_account_id: UUID
+
+
+class AllocationCreate(BaseModel):
+    invoice_id: UUID
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+
+
+class PaymentCreate(BaseModel):
+    party_id: UUID
+    payment_date: date
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    reference: str = Field(min_length=1, max_length=100)
+    method: str = Field(min_length=1, max_length=50)
+    allocations: list[AllocationCreate] = Field(min_length=1)
+
+
+class AllocationRead(ORMModel):
+    id: UUID
+    invoice_id: UUID
+    amount: Decimal
+
+
+class PaymentRead(ORMModel):
+    id: UUID
+    party_id: UUID
+    payment_date: date
+    amount: Decimal
+    reference: str
+    method: str
+    status: str
+    journal_id: UUID | None
+    allocations: list[AllocationRead]
+
+
+class PaymentPost(BaseModel):
+    cash_account_id: UUID
+    receivable_account_id: UUID

@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
-from backend.app.api.routes import auth, health, users
+from backend.app.api.routes import accounting, auth, health, reporting, users
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["system"])
 api_router.include_router(auth.router, tags=["authentication"])
 api_router.include_router(users.router, tags=["users"])
-
+api_router.include_router(accounting.router, tags=["accounting"])
+api_router.include_router(reporting.router, tags=["reports"])

@@ -6,7 +6,8 @@ cash-flow forecasting, and customer/supplier segmentation.
 
 The repository is being implemented in verified milestones. Stage 1 provides
 the runnable three-service foundation; Stage 2 adds PostgreSQL persistence,
-identity, JWT authentication, database-backed RBAC, and security audit events. See
+identity, JWT authentication, database-backed RBAC, and security audit events.
+Stage 3 adds the transactional double-entry accounting vertical slice. See
 [PROJECT_ANALYSIS.md](PROJECT_ANALYSIS.md) for the audit, architecture, risks,
 and roadmap.
 
@@ -29,3 +30,17 @@ Local backend and frontend setup is documented in [docs/SETUP.md](docs/SETUP.md)
 Compose applies Alembic migrations and idempotently seeds roles/permissions
 before starting the development API. It never creates an administrator unless
 both optional bootstrap environment variables are explicitly set.
+
+## Stage 3 accounting API
+
+Authenticated, permission-protected APIs now manage parties, products, the
+chart of accounts, financial periods, draft/post/reverse journals, invoices,
+payments, and allocations. Invoice issuance and payment posting use the same
+balanced journal posting engine. See [STAGE_3_IMPLEMENTATION.md](STAGE_3_IMPLEMENTATION.md).
+
+## Stage 4 reports API
+
+Stage 4 adds read-only financial statements, revenue/expense summaries,
+historical receivables, liability-account payable exposure, customer history,
+cash receipts, and operational dashboard aggregates. Every value is derived
+from persisted posted accounting records and protected by `reports:read`.

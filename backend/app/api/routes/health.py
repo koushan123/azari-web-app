@@ -11,4 +11,3 @@ router = APIRouter()
 def health_check() -> HealthResponse:
     """Return liveness information without accessing external dependencies."""
     return HealthResponse(status="ok", service="backend", timestamp=datetime.now(UTC))
-

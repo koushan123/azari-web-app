@@ -216,3 +216,28 @@ Stage 2 is **PASS**. Verification completed on Python 3.12 and PostgreSQL 16:
 
 Detailed implementation, security decisions, tests, and limitations are in
 `STAGE_2_IMPLEMENTATION.md`. Stage 3 has not started.
+
+## Stage 3 — Accounting vertical slice
+
+Stage 3 is **PASS**. It adds normalized master data, financial periods,
+double-entry journals with immutable posting and reversal, backend-calculated
+receivable invoices, and allocated customer payments. Invoice issuance and
+payment posting are atomic and use the centralized posting engine. The new
+Alembic revision was verified upgrade/downgrade/upgrade with no model drift on
+isolated PostgreSQL. The suite passes 42 tests at 93% total application coverage
+and 93% accounting-service coverage, strict mypy, Ruff, frontend build, and the
+three-service Compose runtime. Details are in `STAGE_3_IMPLEMENTATION.md`.
+Stage 4 has not started.
+
+## Stage 4 — Reports and dashboard API
+
+Stage 4 is **PASS**. The authoritative boundary is roadmap item 4: statements,
+receivables/payables, filters, and dashboard aggregates derived from persisted
+records. It adds a read-only reporting repository/service/API for trial balance,
+income statement, revenue, expenses, balance sheet, historical receivables,
+liability-account payable exposure, customer history, posted cash receipts, and
+operational dashboard metrics. Index-only migration `20260818_0002` supports
+the report filters without changing domain data. The suite passes
+46 tests at 95% application coverage; reporting repository/service coverage is
+100%/99%. Strict mypy, Ruff, frontend build, PostgreSQL aggregation/drift, and
+the Compose runtime all pass. Stage 5 and ML have not started.
