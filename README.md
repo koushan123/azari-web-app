@@ -11,6 +11,11 @@ Stage 3 adds the transactional double-entry accounting vertical slice. See
 [PROJECT_ANALYSIS.md](PROJECT_ANALYSIS.md) for the audit, architecture, risks,
 and roadmap.
 
+Stage 7 adds the complete Persian/RTL web application: authenticated and
+permission-aware accounting workflows, statements and operational dashboard,
+dual Jalali/Gregorian dates, responsive navigation, light/dark themes, and all
+four Stage 6 AI workflows. Open it at `http://localhost:4173` after startup.
+
 ## Quick start
 
 1. Copy `.env.example` to `.env` and replace every `change-me` value.
@@ -60,3 +65,26 @@ to HTTP or the database yet.
 
 Generated CSVs and versioned artifacts are ignored by Git. See
 [docs/ML.md](docs/ML.md) and [STAGE_5_IMPLEMENTATION.md](STAGE_5_IMPLEMENTATION.md).
+
+## Stage 6 ML integration
+
+Stage 6 connects those artifacts to PostgreSQL and protected `/api/v1/ml`
+endpoints through a database-backed registry, active-version selection,
+thread-safe artifact cache, append-only predictions, feedback, RBAC, and audit
+events. It uses real persisted invoice/payment/customer history at explicit
+cutoffs where applicable. Training remains offline; registration and activation
+are ADMIN-only through `ml:manage`. See
+[STAGE_6_IMPLEMENTATION.md](STAGE_6_IMPLEMENTATION.md).
+
+## Stage 7 production frontend
+
+The React application is now a Persian business interface rather than a
+technical health shell. It uses the existing JWT and RBAC contracts, sends all
+accounting and report data through the versioned API, and never substitutes
+sample values for absent records. Desktop navigation is top-based; tablet and
+mobile navigation uses a right-side drawer. Light is the default theme and the
+dark theme and calendar choice persist locally.
+
+Frontend developer and test commands are in [frontend/README.md](frontend/README.md).
+Implementation and verification details are in
+[STAGE_7_IMPLEMENTATION.md](STAGE_7_IMPLEMENTATION.md).

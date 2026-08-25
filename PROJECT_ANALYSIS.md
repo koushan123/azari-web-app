@@ -263,4 +263,53 @@ runs. The Python 3.12 backend image installs inference dependencies and the
 three-service Compose stack remains healthy at 8100→8000 and 4173→80, with
 PostgreSQL at Alembic head `20260818_0002`. Synthetic benchmark metrics are not
 claims of real-world performance. See `STAGE_5_IMPLEMENTATION.md`. Stage 6 has
-not started.
+now been implemented as described below.
+
+## Stage 6 — ML integration
+
+Stage 6 is **PASS**. Migration `20260825_0003` adds a database-backed model
+registry, append-oriented predictions, and append-only feedback without
+changing accounting tables. Protected `/api/v1/ml` routes delegate to an ML
+application service and repository. Controlled artifact identifiers, metadata
+and feature-schema validation, dependency compatibility checks, one-active-model
+constraints, and a lock-protected invalidating cache prevent arbitrary or stale
+model selection.
+
+All four Stage 5 pipelines use active registered artifacts. Transaction text is
+classified directly without persisting its raw description. Payment risk,
+cash-flow forecasts, and customer segmentation derive features from persisted
+accounting history available at the requested cutoff. Predictions store only
+structured outputs, safe references, confidence/review/explanation metadata,
+and user/model context. Registration, activation, and feedback are audited;
+new `ml:predict`, `ml:manage`, and `ml:feedback` permissions extend existing
+database RBAC.
+
+The final 67-test suite passes at 96% combined coverage, Ruff and strict mypy
+pass, the migration passes upgrade/downgrade/upgrade and zero-drift checks, and
+the Python 3.12 Compose runtime verifies model registration, activation,
+inference, PostgreSQL persistence, feedback, audit, RBAC, and both host health
+checks. Details are in `STAGE_6_IMPLEMENTATION.md`. Stage 7 is described below.
+
+## Stage 7 — Production frontend
+
+Stage 7 is **PASS**. The technical connectivity shell has been replaced by a
+complete Persian/RTL React application. It provides session JWT login/logout,
+protected routes, permission-aware grouped top navigation and mobile right-side
+drawer, persistent light/dark themes, English-digit financial formatting, and
+Jalali/Gregorian input and display while retaining Gregorian API storage.
+
+Operational pages consume the existing APIs for the dashboard, parties,
+products, accounts/categories, financial periods, journals, invoices, payments,
+all nine report views, users, model/prediction history, feedback, model
+registration/activation, and all four inference workflows. No mock financial or
+AI values were added. The frontend documents the existing lack of supplier-level
+payable detail instead of inventing it.
+
+Frontend type checking and production build pass; 11 focused frontend tests
+pass. The complete 67-test backend/ML suite, Ruff, strict mypy, Compose config,
+the rebuilt frontend container, three-service runtime, PostgreSQL/backend health,
+both host HTTP checks, and `git diff --check` pass. A separate uncached rebuild
+of the unchanged backend image was attempted twice and was blocked by host
+outbound timeouts to PyPI; the already verified Stage 6 backend image remained
+healthy in the final runtime. See `STAGE_7_IMPLEMENTATION.md` for full evidence.
+Stage 8 was not started.

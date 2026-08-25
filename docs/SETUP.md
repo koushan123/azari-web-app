@@ -14,6 +14,12 @@ The Compose backend command waits for healthy PostgreSQL, runs
 starts Uvicorn. The image default itself only starts Uvicorn so migration policy
 can be controlled independently outside the development Compose environment.
 
+The Persian frontend is available at `http://localhost:4173`; the API is at
+`http://localhost:8100/api/v1`. The browser uses the host API URL while
+containers retain Docker service-name networking internally. Light mode is the
+default; display theme and Jalali/Gregorian calendar preferences persist in the
+browser. JWT access tokens are session-scoped and removed on logout or HTTP 401.
+
 ## Backend without Docker
 
 Python 3.12 is the supported runtime. From the repository root:
@@ -53,6 +59,17 @@ the check; the script refuses any other database name.
 
 From `frontend/`, run `npm.cmd install` and `npm.cmd run dev` on Windows. The
 frontend reads `VITE_API_URL`; its default is `http://localhost:8100/api/v1`.
+
+Run frontend quality gates from the same directory:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd run build
+.\test.cmd
+```
+
+`test.cmd` creates an ignored SSR test bundle and uses Node's test runner, so
+the project does not require an additional browser-test runtime dependency.
 
 ## Required secrets
 

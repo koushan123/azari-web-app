@@ -1,0 +1,32 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { renderToStaticMarkup } from "react-dom/server";
+import indexHtml from "../index.html?raw";
+import { configureApi, api, ApiError } from "../src/services/api";
+import { formatMoney, formatNumber, formatPercent, toEnglishDigits } from "../src/utils/format";
+import { gregorianToJalali, jalaliToGregorian } from "../src/utils/date";
+import { visibleNavigationPaths } from "../src/layouts/AppLayout";
+import { defaultTheme, nextTheme, ThemeProvider } from "../src/theme/ThemeContext";
+import { Kpi } from "../src/pages/DashboardPage";
+import { ReportResult } from "../src/pages/ReportsPage";
+import { ClassificationPage, ForecastPage } from "../src/pages/AiPages";
+import { routes } from "../src/App";
+
+const storage = new Map<string, string>();
+Object.assign(globalThis, {
+  localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
+  sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
+});
+
+test("document is Persian and RTL", () => { assert.match(indexHtml, /<html lang="fa" dir="rtl">/); assert.match(indexHtml, /حسابداری آذری/); });
+test("financial formatting always uses English digits", () => { assert.equal(formatMoney("123456.7"), "123,456.70"); assert.equal(formatNumber(1234.5), "1,234.5"); assert.equal(formatPercent(.831), "83.1%"); assert.equal(toEnglishDigits("۱۲۳٤٥"), "12345"); });
+test("Jalali and Gregorian conversion round trip", () => { assert.equal(gregorianToJalali("2026-08-25"), "1405/06/03"); assert.equal(jalaliToGregorian("۱۴۰۵/۰۶/۰۳"), "2026-08-25"); assert.throws(() => jalaliToGregorian("1404/12/30")); });
+test("light theme is default and switching is deterministic", () => { assert.equal(defaultTheme(null), "light"); assert.equal(defaultTheme("dark"), "dark"); assert.equal(nextTheme("light"), "dark"); assert.equal(nextTheme("dark"), "light"); });
+test("permission-aware navigation hides unauthorized areas", () => { const viewer = visibleNavigationPaths((permission) => ["reports:read", "ml:read"].includes(permission)); assert.ok(viewer.includes("/dashboard")); assert.ok(viewer.includes("/reports/trial-balance")); assert.ok(viewer.includes("/ai")); assert.ok(!viewer.includes("/journals")); assert.ok(!viewer.includes("/ai/models")); assert.ok(viewer.includes("/settings")); });
+test("protected routes declare their backend permission", () => { assert.equal(routes.find((route) => route.path === "/journals")?.permission, "journals:read"); assert.equal(routes.find((route) => route.path === "/ai/models")?.permission, "ml:manage"); assert.equal(routes.find((route) => route.path === "/settings")?.permission, undefined); });
+test("authentication requests use the existing JWT contract", async () => { const calls: Array<{ url: string; auth: string | null }> = []; globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => { const url = String(input); calls.push({ url, auth: new Headers(init?.headers).get("Authorization") }); if (url.endsWith("/auth/login")) return new Response(JSON.stringify({ access_token: "jwt-token", token_type: "bearer" }), { status: 200, headers: { "Content-Type": "application/json" } }); return new Response(JSON.stringify({ id: "1", email: "a@example.com", first_name: "علی", last_name: "آذری", is_active: true, roles: ["ADMIN"], permissions: ["reports:read"] }), { status: 200, headers: { "Content-Type": "application/json" } }); }) as typeof fetch; configureApi(() => null, () => undefined); const token = await api.login("a@example.com", "strong-password"); assert.equal(token.access_token, "jwt-token"); configureApi(() => token.access_token, () => undefined); const user = await api.me(); assert.equal(user.first_name, "علی"); assert.equal(calls[1].auth, "Bearer jwt-token"); });
+test("API errors are translated and 401 clears authentication", async () => { let unauthorized = false; globalThis.fetch = (async () => new Response(JSON.stringify({ detail: "Insufficient permission" }), { status: 403, headers: { "Content-Type": "application/json" } })) as typeof fetch; configureApi(() => "token", () => { unauthorized = true; }); await assert.rejects(api.get("/users"), (error: unknown) => error instanceof ApiError && error.status === 403 && error.message.includes("اجازه")); assert.equal(unauthorized, false); globalThis.fetch = (async () => new Response(JSON.stringify({ detail: "Authentication required" }), { status: 401, headers: { "Content-Type": "application/json" } })) as typeof fetch; await assert.rejects(api.me(), ApiError); assert.equal(unauthorized, true); });
+test("important transaction form is rendered in Persian", () => { const html = renderToStaticMarkup(<ClassificationPage/>); assert.match(html, /شرح تراکنش/); assert.match(html, /تحلیل تراکنش/); assert.match(html, /اطلاعات حساس/); assert.doesNotMatch(html, /lorem ipsum/i); });
+test("dashboard KPI renders backend-provided values without substitution", () => { const html = renderToStaticMarkup(<Kpi title="درآمد" value="987654.32"/>); assert.match(html, /987,654.32/); assert.match(html, /درآمد/); });
+test("report result renders actual response totals and balanced status", () => { const html = renderToStaticMarkup(<ReportResult kind="trial-balance" data={{ start_date: null, end_date: null, lines: [], total_debit: "500.00", total_credit: "500.00", balanced: true }}/>); assert.match(html, /500.00/); assert.match(html, /ثبت‌شده/); assert.match(html, /گردش مالی وجود ندارد/); });
+test("AI forecast workflow exposes horizon, date and uncertainty language", () => { const html = renderToStaticMarkup(<ThemeProvider><ForecastPage/></ThemeProvider>); assert.match(html, /افق پیش‌بینی/); assert.match(html, /اطلاعات تا تاریخ/); assert.match(html, /پیش‌بینی جریان نقدی/); });

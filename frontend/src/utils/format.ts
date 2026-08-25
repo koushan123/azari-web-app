@@ -1,0 +1,13 @@
+const digits = (value: string) => value.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+const numbers = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, numberingSystem: "latn" });
+const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, numberingSystem: "latn" });
+const percents = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1, numberingSystem: "latn" });
+export const formatNumber = (value: string | number | null | undefined) => numbers.format(Number(value ?? 0));
+export const formatMoney = (value: string | number | null | undefined) => money.format(Number(value ?? 0));
+export const formatPercent = (value: number | null | undefined) => percents.format(value ?? 0);
+export const toEnglishDigits = digits;
+export const shortId = (value: string) => digits(value.slice(0, 8));
+export const STATUS_LABELS: Record<string, string> = { ACTIVE: "فعال", INACTIVE: "غیرفعال", OPEN: "باز", CLOSED: "بسته", DRAFT: "پیش‌نویس", POSTED: "ثبت‌شده", REVERSED: "برگشت‌خورده", ISSUED: "صادرشده", PARTIALLY_PAID: "پرداخت جزئی", PAID: "پرداخت‌شده", CANCELLED: "لغوشده", OVERDUE: "سررسیدگذشته", HIGH: "بالا", MEDIUM: "متوسط", LOW: "پایین" };
+export const statusLabel = (value: string) => STATUS_LABELS[value.toUpperCase()] ?? value;
+export const ACCOUNT_TYPE_LABELS: Record<string, string> = { ASSET: "دارایی", LIABILITY: "بدهی", EQUITY: "حقوق مالکانه", REVENUE: "درآمد", EXPENSE: "هزینه" };
+export const PIPELINE_LABELS: Record<string, string> = { transaction_classification: "طبقه‌بندی تراکنش", payment_delay_risk: "ریسک تأخیر پرداخت", cash_flow_forecast: "پیش‌بینی جریان نقدی", customer_segmentation: "بخش‌بندی مشتریان" };

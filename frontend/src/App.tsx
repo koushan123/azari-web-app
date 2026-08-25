@@ -1,53 +1,21 @@
-import { useEffect, useState } from "react";
-
-import { getHealth } from "./services/api";
+import { useEffect } from "react";
+import { useAuth } from "./auth/AuthContext";
+import { LoadingState } from "./components/ui";
+import { AppLayout } from "./layouts/AppLayout";
+import { SettingsPage, UsersPage } from "./pages/AdminPages";
+import { AiDashboardPage, ClassificationPage, ForecastPage, ModelsPage, RiskPage, SegmentsPage } from "./pages/AiPages";
+import { DashboardPage } from "./pages/DashboardPage";
+import { LoginPage } from "./pages/LoginPage";
+import { AccountsPage, PartiesPage, PeriodsPage, ProductsPage } from "./pages/MasterDataPages";
+import { ReportsPage } from "./pages/ReportsPage";
+import { InvoicesPage, JournalsPage, PaymentsPage } from "./pages/TransactionsPages";
+import { Link, useRouter } from "./routes/router";
 import "./styles.css";
-
-type ConnectionState = "checking" | "connected" | "unavailable";
-
-export default function App() {
-  const [connection, setConnection] = useState<ConnectionState>("checking");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getHealth(controller.signal)
-      .then(() => setConnection("connected"))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setConnection("unavailable");
-      });
-    return () => controller.abort();
-  }, []);
-
-  return (
-    <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">Azari · Intelligent Accounting</p>
-        <h1>Financial clarity, with accountable intelligence.</h1>
-        <p className="summary">
-          Double-entry accounting and four explainable machine-learning workflows,
-          designed as one integrated system.
-        </p>
-        <div className={`status status--${connection}`} role="status">
-          <span aria-hidden="true" />
-          API {connection}
-        </div>
-      </section>
-      <section className="modules" aria-label="Planned intelligence modules">
-        {[
-          ["01", "Transaction AI", "TF-IDF classification with confidence review"],
-          ["02", "Credit Risk", "Random Forest payment-delay probability"],
-          ["03", "Cash Flow", "Time-series forecasts and liquidity warnings"],
-          ["04", "Segmentation", "Interpreted K-Means customer and supplier groups"],
-        ].map(([number, title, detail]) => (
-          <article key={number}>
-            <span>{number}</span>
-            <h2>{title}</h2>
-            <p>{detail}</p>
-          </article>
-        ))}
-      </section>
-    </main>
-  );
-}
-
+interface Route { path: string; component: () => React.JSX.Element; permission?: string; prefix?: boolean }
+export const routes: Route[] = [
+  { path: "/dashboard", component: DashboardPage, permission: "reports:read" }, { path: "/parties", component: PartiesPage, permission: "parties:read" }, { path: "/products", component: ProductsPage, permission: "products:read" }, { path: "/accounts", component: AccountsPage, permission: "accounts:read" }, { path: "/periods", component: PeriodsPage, permission: "periods:read" }, { path: "/journals", component: JournalsPage, permission: "journals:read" }, { path: "/invoices", component: InvoicesPage, permission: "invoices:read" }, { path: "/payments", component: PaymentsPage, permission: "payments:read" },
+  { path: "/reports/", component: ReportsPage, permission: "reports:read", prefix: true }, { path: "/ai", component: AiDashboardPage, permission: "ml:read" }, { path: "/ai/classification", component: ClassificationPage, permission: "ml:predict" }, { path: "/ai/risk", component: RiskPage, permission: "ml:predict" }, { path: "/ai/forecast", component: ForecastPage, permission: "ml:predict" }, { path: "/ai/segments", component: SegmentsPage, permission: "ml:predict" }, { path: "/ai/models", component: ModelsPage, permission: "ml:manage" }, { path: "/users", component: UsersPage, permission: "users:read" }, { path: "/settings", component: SettingsPage },
+];
+function MessagePage({ forbidden = false }: { forbidden?: boolean }) { return <div className="message-page"><span>{forbidden ? "!" : "؟"}</span><h1>{forbidden ? "دسترسی مجاز نیست" : "صفحه پیدا نشد"}</h1><p>{forbidden ? "نقش کاربری شما اجازه مشاهده این بخش را ندارد." : "نشانی واردشده در سامانه وجود ندارد."}</p><Link to="/dashboard" className="button button--primary">بازگشت به داشبورد</Link></div>; }
+function Redirect({ to }: { to: string }) { const { navigate } = useRouter(); useEffect(() => navigate(to, true), [navigate, to]); return <LoadingState label="در حال انتقال…"/>; }
+export default function App() { const { user, loading, can } = useAuth(); const { path } = useRouter(); if (loading) return <main className="boot"><div className="login-mark">آ</div><LoadingState label="در حال بررسی حساب کاربری…"/></main>; if (!user) return path === "/login" ? <LoginPage/> : <Redirect to="/login"/>; if (path === "/login" || path === "/") return <Redirect to="/dashboard"/>; const route = routes.find((r) => r.prefix ? path.startsWith(r.path) : path === r.path); const Page = route?.component; return <AppLayout>{!route ? <MessagePage/> : route.permission && !can(route.permission) ? <MessagePage forbidden/> : Page ? <Page/> : null}</AppLayout>; }
