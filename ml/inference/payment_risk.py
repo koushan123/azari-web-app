@@ -7,4 +7,3 @@ from ml.training.payment_risk import (
 )
 
 __all__ = ["PaymentRiskModel", "RiskPrediction", "load_payment_risk_model"]
-

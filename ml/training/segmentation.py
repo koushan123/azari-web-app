@@ -15,8 +15,13 @@ from sklearn.preprocessing import StandardScaler
 from ml.common import ArtifactMetadata, load_artifact, make_metadata, save_artifact
 
 SEGMENT_FEATURES = [
-    "invoice_count", "total_invoice_amount", "avg_invoice_amount",
-    "total_payment_amount", "avg_delay_days", "outstanding_balance", "payment_frequency",
+    "invoice_count",
+    "total_invoice_amount",
+    "avg_invoice_amount",
+    "total_payment_amount",
+    "avg_delay_days",
+    "outstanding_balance",
+    "payment_frequency",
 ]
 
 
@@ -37,7 +42,9 @@ class SegmentationModel:
     def predict(self, customer: dict[str, float]) -> SegmentPrediction:
         frame = pd.DataFrame([{name: customer[name] for name in SEGMENT_FEATURES}])
         segment = int(self.estimator.predict(self.scaler.transform(frame))[0])
-        return SegmentPrediction(segment, self.descriptions[segment], self.metadata.model_version)
+        return SegmentPrediction(
+            segment, self.descriptions[segment], self.metadata.model_version
+        )
 
 
 def _describe_centroids(scaler: StandardScaler, estimator: KMeans) -> dict[int, str]:
@@ -47,15 +54,30 @@ def _describe_centroids(scaler: StandardScaler, estimator: KMeans) -> dict[int, 
     medians = centroids.median()
     descriptions: dict[int, str] = {}
     for segment, row in centroids.iterrows():
-        value = "high-value" if row["total_invoice_amount"] >= medians["total_invoice_amount"] else "lower-value"
-        timing = "slow-paying" if row["avg_delay_days"] >= medians["avg_delay_days"] else "reliable-paying"
-        balance = "high-outstanding" if row["outstanding_balance"] >= medians["outstanding_balance"] else "low-outstanding"
+        value = (
+            "high-value"
+            if row["total_invoice_amount"] >= medians["total_invoice_amount"]
+            else "lower-value"
+        )
+        timing = (
+            "slow-paying"
+            if row["avg_delay_days"] >= medians["avg_delay_days"]
+            else "reliable-paying"
+        )
+        balance = (
+            "high-outstanding"
+            if row["outstanding_balance"] >= medians["outstanding_balance"]
+            else "low-outstanding"
+        )
         descriptions[int(segment)] = f"{value}, {timing}, {balance} customers"
     return descriptions
 
 
 def train_segmentation_model(
-    data: pd.DataFrame, *, seed: int, candidate_k: tuple[int, ...] = (2, 3, 4, 5, 6),
+    data: pd.DataFrame,
+    *,
+    seed: int,
+    candidate_k: tuple[int, ...] = (2, 3, 4, 5, 6),
     model_version: str = "customer-segments-v1",
 ) -> tuple[SegmentationModel, dict[int, dict[str, float]]]:
     train, _ = train_test_split(data, test_size=0.2, random_state=seed)
@@ -78,16 +100,24 @@ def train_segmentation_model(
         "inertia": evaluations[selected_k]["inertia"],
     }
     metadata = make_metadata(
-        pipeline="customer_segmentation", model_version=model_version, data=data,
-        features=SEGMENT_FEATURES, seed=seed, config={"candidate_k": list(candidate_k)}, metrics=metrics,
+        pipeline="customer_segmentation",
+        model_version=model_version,
+        data=data,
+        features=SEGMENT_FEATURES,
+        seed=seed,
+        config={"candidate_k": list(candidate_k)},
+        metrics=metrics,
     )
-    model = SegmentationModel(scaler, estimator, _describe_centroids(scaler, estimator), metadata)
+    model = SegmentationModel(
+        scaler, estimator, _describe_centroids(scaler, estimator), metadata
+    )
     return model, evaluations
 
 
 def save_segmentation_model(model: SegmentationModel, path: Path) -> None:
     state: dict[str, Any] = {
-        "scaler": model.scaler, "estimator": model.estimator,
+        "scaler": model.scaler,
+        "estimator": model.estimator,
         "descriptions": model.descriptions,
     }
     save_artifact(path, state, model.metadata)
@@ -97,4 +127,6 @@ def load_segmentation_model(path: Path) -> SegmentationModel:
     state, metadata = load_artifact(
         path, pipeline="customer_segmentation", expected_features=SEGMENT_FEATURES
     )
-    return SegmentationModel(state["scaler"], state["estimator"], state["descriptions"], metadata)
+    return SegmentationModel(
+        state["scaler"], state["estimator"], state["descriptions"], metadata
+    )

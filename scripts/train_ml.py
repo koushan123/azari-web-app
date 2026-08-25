@@ -15,27 +15,37 @@ from ml.training.transaction import save_transaction_model, train_transaction_mo
 
 def train_all(output: Path, config: MLConfig) -> dict[str, dict[str, float]]:
     transaction, comparisons = train_transaction_model(
-        transaction_data(config.random_seed), seed=config.random_seed,
+        transaction_data(config.random_seed),
+        seed=config.random_seed,
         confidence_threshold=config.confidence_threshold,
     )
-    save_transaction_model(transaction, output / "transaction" / transaction.metadata.model_version)
+    save_transaction_model(
+        transaction, output / "transaction" / transaction.metadata.model_version
+    )
 
     risk, risk_metrics, _ = train_payment_risk_model(
-        payment_data(config.random_seed), seed=config.random_seed,
+        payment_data(config.random_seed),
+        seed=config.random_seed,
         delay_days=config.risk_delay_days,
     )
     save_payment_risk_model(risk, output / "payment-risk" / risk.metadata.model_version)
 
     forecast, forecast_metrics = train_cash_flow_model(
-        cash_flow_data(config.random_seed), seed=config.random_seed,
+        cash_flow_data(config.random_seed),
+        seed=config.random_seed,
         horizon=config.forecast_horizon,
     )
-    save_cash_flow_model(forecast, output / "cash-flow" / forecast.metadata.model_version)
+    save_cash_flow_model(
+        forecast, output / "cash-flow" / forecast.metadata.model_version
+    )
 
     segments, segment_metrics = train_segmentation_model(
-        customer_data(config.random_seed), seed=config.random_seed,
+        customer_data(config.random_seed),
+        seed=config.random_seed,
     )
-    save_segmentation_model(segments, output / "segmentation" / segments.metadata.model_version)
+    save_segmentation_model(
+        segments, output / "segmentation" / segments.metadata.model_version
+    )
     return {
         "transaction": comparisons[transaction.metadata.config["selected_model"]],
         "payment_risk": risk_metrics,
@@ -55,4 +65,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

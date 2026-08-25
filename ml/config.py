@@ -21,4 +21,3 @@ class MLConfig:
             risk_delay_days=int(os.getenv("ML_RISK_DELAY_DAYS", "7")),
             forecast_horizon=int(os.getenv("ML_FORECAST_HORIZON", "30")),
         )
-

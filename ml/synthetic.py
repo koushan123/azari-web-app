@@ -9,11 +9,26 @@ import pandas as pd
 def transaction_data(seed: int = 42, rows: int = 900) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     vocabulary = {
-        "office_supplies": ["printer paper", "desk chair", "ink cartridge", "stationery"],
+        "office_supplies": [
+            "printer paper",
+            "desk chair",
+            "ink cartridge",
+            "stationery",
+        ],
         "travel": ["hotel booking", "airline ticket", "taxi fare", "train journey"],
-        "utilities": ["electric bill", "internet service", "water charge", "mobile plan"],
+        "utilities": [
+            "electric bill",
+            "internet service",
+            "water charge",
+            "mobile plan",
+        ],
         "meals": ["client lunch", "team dinner", "coffee meeting", "catering order"],
-        "software": ["cloud subscription", "software licence", "hosting renewal", "app plan"],
+        "software": [
+            "cloud subscription",
+            "software licence",
+            "hosting renewal",
+            "app plan",
+        ],
     }
     merchants = ["north", "central", "prime", "metro", "acme", "global"]
     noise = ["monthly", "business", "invoice", "payment", "online", "local", "urgent"]
@@ -23,17 +38,23 @@ def transaction_data(seed: int = 42, rows: int = 900) -> pd.DataFrame:
         label = labels[index % len(labels)]
         phrase_label = label
         if rng.random() < 0.12:
-            phrase_label = str(rng.choice([value for value in labels if value != label]))
+            phrase_label = str(
+                rng.choice([value for value in labels if value != label])
+            )
         phrase = str(rng.choice(vocabulary[phrase_label]))
         words = [str(rng.choice(merchants)), phrase, str(rng.choice(noise))]
         if rng.random() < 0.18:
             other = str(rng.choice([value for value in labels if value != label]))
             words.append(str(rng.choice(vocabulary[other])).split()[0])
-        records.append({"description": " ".join(words), "category": label, "is_synthetic": True})
+        records.append(
+            {"description": " ".join(words), "category": label, "is_synthetic": True}
+        )
     return pd.DataFrame(records)
 
 
-def payment_data(seed: int = 42, customers: int = 100, invoices: int = 12) -> pd.DataFrame:
+def payment_data(
+    seed: int = 42, customers: int = 100, invoices: int = 12
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     records: list[dict[str, object]] = []
     base = pd.Timestamp("2023-01-01")
@@ -47,12 +68,22 @@ def payment_data(seed: int = 42, customers: int = 100, invoices: int = 12) -> pd
             delay = round(profile_delay + rng.normal(0, 6))
             payment_date = due_date + pd.Timedelta(delay, unit="D")
             amount = max(25.0, base_amount * float(rng.lognormal(0, 0.28)))
-            records.append({
-                "customer_id": f"C{customer:04d}", "invoice_id": f"I{customer:04d}-{sequence:02d}",
-                "invoice_date": invoice_date, "due_date": due_date, "payment_date": payment_date,
-                "amount": round(amount, 2), "is_synthetic": True,
-            })
-    return pd.DataFrame(records).sort_values(["invoice_date", "customer_id"]).reset_index(drop=True)
+            records.append(
+                {
+                    "customer_id": f"C{customer:04d}",
+                    "invoice_id": f"I{customer:04d}-{sequence:02d}",
+                    "invoice_date": invoice_date,
+                    "due_date": due_date,
+                    "payment_date": payment_date,
+                    "amount": round(amount, 2),
+                    "is_synthetic": True,
+                }
+            )
+    return (
+        pd.DataFrame(records)
+        .sort_values(["invoice_date", "customer_id"])
+        .reset_index(drop=True)
+    )
 
 
 def cash_flow_data(seed: int = 42, days: int = 500) -> pd.DataFrame:
@@ -60,10 +91,15 @@ def cash_flow_data(seed: int = 42, days: int = 500) -> pd.DataFrame:
     dates = pd.date_range("2023-01-01", periods=days, freq="D")
     t = np.arange(days)
     values = (
-        850 + 1.15 * t + 210 * np.sin(2 * np.pi * t / 7)
-        + 130 * np.cos(2 * np.pi * t / 30.5) + rng.normal(0, 95, days)
+        850
+        + 1.15 * t
+        + 210 * np.sin(2 * np.pi * t / 7)
+        + 130 * np.cos(2 * np.pi * t / 30.5)
+        + rng.normal(0, 95, days)
     )
-    return pd.DataFrame({"date": dates, "net_cash_flow": values.round(2), "is_synthetic": True})
+    return pd.DataFrame(
+        {"date": dates, "net_cash_flow": values.round(2), "is_synthetic": True}
+    )
 
 
 def customer_data(seed: int = 42, rows: int = 260) -> pd.DataFrame:
@@ -76,13 +112,19 @@ def customer_data(seed: int = 42, rows: int = 260) -> pd.DataFrame:
         avg_amount = max(50, float(rng.normal(average, average * 0.28)))
         total = invoice_count * avg_amount
         outstanding = max(0, total * float(rng.normal(outstanding_rate, 0.07)))
-        records.append({
-            "customer_id": f"C{index:04d}", "invoice_count": invoice_count,
-            "total_invoice_amount": round(total, 2), "avg_invoice_amount": round(avg_amount, 2),
-            "total_payment_amount": round(max(0, total - outstanding), 2),
-            "avg_delay_days": round(max(-5, float(rng.normal(delay, 5))), 2),
-            "outstanding_balance": round(outstanding, 2),
-            "payment_frequency": round(invoice_count / float(rng.uniform(8, 16)), 3),
-            "is_synthetic": True,
-        })
+        records.append(
+            {
+                "customer_id": f"C{index:04d}",
+                "invoice_count": invoice_count,
+                "total_invoice_amount": round(total, 2),
+                "avg_invoice_amount": round(avg_amount, 2),
+                "total_payment_amount": round(max(0, total - outstanding), 2),
+                "avg_delay_days": round(max(-5, float(rng.normal(delay, 5))), 2),
+                "outstanding_balance": round(outstanding, 2),
+                "payment_frequency": round(
+                    invoice_count / float(rng.uniform(8, 16)), 3
+                ),
+                "is_synthetic": True,
+            }
+        )
     return pd.DataFrame(records)

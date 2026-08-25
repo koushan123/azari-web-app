@@ -42,8 +42,14 @@ def dependency_versions() -> dict[str, str]:
 
 
 def make_metadata(
-    *, pipeline: str, model_version: str, data: pd.DataFrame,
-    features: list[str], seed: int, config: dict[str, Any], metrics: dict[str, float]
+    *,
+    pipeline: str,
+    model_version: str,
+    data: pd.DataFrame,
+    features: list[str],
+    seed: int,
+    config: dict[str, Any],
+    metrics: dict[str, float],
 ) -> ArtifactMetadata:
     return ArtifactMetadata(
         schema_version=ARTIFACT_SCHEMA_VERSION,

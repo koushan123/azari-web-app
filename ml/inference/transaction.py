@@ -7,4 +7,3 @@ from ml.training.transaction import (
 )
 
 __all__ = ["TransactionModel", "TransactionPrediction", "load_transaction_model"]
-

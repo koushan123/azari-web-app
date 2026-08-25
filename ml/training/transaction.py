@@ -39,39 +39,59 @@ class TransactionModel:
         confidence = float(probabilities[position])
         category = str(self.estimator.classes_[position])
         return TransactionPrediction(
-            category, confidence, confidence < self.confidence_threshold,
+            category,
+            confidence,
+            confidence < self.confidence_threshold,
             self.metadata.model_version,
         )
 
 
 def train_transaction_model(
-    data: pd.DataFrame, *, seed: int, confidence_threshold: float,
+    data: pd.DataFrame,
+    *,
+    seed: int,
+    confidence_threshold: float,
     model_version: str = "transaction-v1",
 ) -> tuple[TransactionModel, dict[str, dict[str, float]]]:
     train, test = train_test_split(
         data, test_size=0.25, random_state=seed, stratify=data["category"]
     )
     candidates: dict[str, Pipeline] = {
-        "multinomial_nb": Pipeline([
-            ("tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2)),
-            ("classifier", MultinomialNB()),
-        ]),
-        "calibrated_linear_svm": Pipeline([
-            ("tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2)),
-            ("classifier", CalibratedClassifierCV(LinearSVC(random_state=seed), cv=3)),
-        ]),
+        "multinomial_nb": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2)),
+                ("classifier", MultinomialNB()),
+            ]
+        ),
+        "calibrated_linear_svm": Pipeline(
+            [
+                ("tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2)),
+                (
+                    "classifier",
+                    CalibratedClassifierCV(LinearSVC(random_state=seed), cv=3),
+                ),
+            ]
+        ),
     }
     scores: dict[str, dict[str, float]] = {}
     for name, estimator in candidates.items():
         estimator.fit(train["description"], train["category"])
         prediction = estimator.predict(test["description"])
         scores[name] = classification_metrics(test["category"], prediction)
-    selected_name = max(scores, key=lambda name: (scores[name]["macro_f1"], scores[name]["accuracy"]))
+    selected_name = max(
+        scores, key=lambda name: (scores[name]["macro_f1"], scores[name]["accuracy"])
+    )
     estimator = candidates[selected_name]
     metadata = make_metadata(
-        pipeline="transaction_classification", model_version=model_version, data=data,
-        features=["description"], seed=seed,
-        config={"confidence_threshold": confidence_threshold, "selected_model": selected_name},
+        pipeline="transaction_classification",
+        model_version=model_version,
+        data=data,
+        features=["description"],
+        seed=seed,
+        config={
+            "confidence_threshold": confidence_threshold,
+            "selected_model": selected_name,
+        },
         metrics=scores[selected_name],
     )
     return TransactionModel(estimator, metadata, confidence_threshold), scores

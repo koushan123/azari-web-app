@@ -7,4 +7,3 @@ from ml.training.segmentation import (
 )
 
 __all__ = ["SegmentPrediction", "SegmentationModel", "load_segmentation_model"]
-

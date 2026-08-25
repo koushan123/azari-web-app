@@ -67,14 +67,16 @@ def test_transaction_comparison_threshold_and_round_trip(tmp_path: Path) -> None
     assert 0 <= prediction.confidence <= 1
     assert prediction.manual_review
     save_transaction_model(model, tmp_path)
-    assert load_transaction_model(tmp_path).predict("hotel booking metro") == model.predict(
+    assert load_transaction_model(tmp_path).predict(
         "hotel booking metro"
-    )
+    ) == model.predict("hotel booking metro")
 
 
 def test_transaction_vectorizer_is_fitted_only_on_training_rows() -> None:
     data = transaction_data(31, 300)
-    _, test = train_test_split(data, test_size=0.25, random_state=31, stratify=data["category"])
+    _, test = train_test_split(
+        data, test_size=0.25, random_state=31, stratify=data["category"]
+    )
     data.loc[test.index[:2], "description"] += " testonlysentinel"
     model, _ = train_transaction_model(data, seed=31, confidence_threshold=0.7)
     assert "testonlysentinel" not in model.estimator.named_steps["tfidf"].vocabulary_
@@ -132,7 +134,9 @@ def test_segmentation_selection_descriptions_and_round_trip(tmp_path: Path) -> N
     data = customer_data(9, 180)
     model, evaluations = train_segmentation_model(data, seed=9, candidate_k=(2, 3, 4))
     assert set(evaluations) == {2, 3, 4}
-    assert all({"inertia", "silhouette"} == set(metrics) for metrics in evaluations.values())
+    assert all(
+        {"inertia", "silhouette"} == set(metrics) for metrics in evaluations.values()
+    )
     sample = {name: float(data.iloc[0][name]) for name in SEGMENT_FEATURES}
     prediction = model.predict(sample)
     assert "customers" in prediction.description
@@ -168,10 +172,16 @@ def test_artifact_pipeline_validation(tmp_path: Path) -> None:
 
 def test_training_is_reproducible_except_timestamp() -> None:
     data = transaction_data(23, 300)
-    first, first_scores = train_transaction_model(data, seed=23, confidence_threshold=0.7)
-    second, second_scores = train_transaction_model(data, seed=23, confidence_threshold=0.7)
+    first, first_scores = train_transaction_model(
+        data, seed=23, confidence_threshold=0.7
+    )
+    second, second_scores = train_transaction_model(
+        data, seed=23, confidence_threshold=0.7
+    )
     assert first_scores == second_scores
-    assert replace(first.metadata, trained_at="") == replace(second.metadata, trained_at="")
+    assert replace(first.metadata, trained_at="") == replace(
+        second.metadata, trained_at=""
+    )
     assert first.predict("cloud subscription monthly") == second.predict(
         "cloud subscription monthly"
     )
