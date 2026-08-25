@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY backend /app/backend
-RUN pip install --no-cache-dir /app/backend
+RUN pip install --no-cache-dir "/app/backend[ml]"
 COPY ml /app/ml
 
 EXPOSE 8000

@@ -240,4 +240,27 @@ operational dashboard metrics. Index-only migration `20260818_0002` supports
 the report filters without changing domain data. The suite passes
 46 tests at 95% application coverage; reporting repository/service coverage is
 100%/99%. Strict mypy, Ruff, frontend build, PostgreSQL aggregation/drift, and
-the Compose runtime all pass. Stage 5 and ML have not started.
+the Compose runtime all pass. Stage 5 is documented below.
+
+## Stage 5 — Offline ML pipelines
+
+Stage 5 is **PASS**. Four framework-independent pipelines now implement
+training, evaluation, versioned save/load, and typed inference: calibrated
+TF-IDF transaction classification, timestamp-aware Random Forest payment-delay
+risk, harmonic linear cash-flow forecasting with chronological backtesting, and
+scaled K-Means customer segmentation with centroid-derived descriptions.
+
+Seeded synthetic generators provide noisy, overlapping demo datasets for each
+pipeline. Artifact metadata records the dataset fingerprint, feature schema,
+configuration, seed, metrics, timestamp, dependency versions, and compatibility
+schema. Generated data/models remain outside Git. Leakage and reproducibility
+tests cover train-only text/scaling preprocessing, point-in-time payment
+snapshots, chronological forecasting, repeated training, and save/load parity.
+
+The complete 57-test backend/ML suite passes at 96% combined coverage, along
+with Ruff, strict mypy, the frontend production build, and all four training
+runs. The Python 3.12 backend image installs inference dependencies and the
+three-service Compose stack remains healthy at 8100→8000 and 4173→80, with
+PostgreSQL at Alembic head `20260818_0002`. Synthetic benchmark metrics are not
+claims of real-world performance. See `STAGE_5_IMPLEMENTATION.md`. Stage 6 has
+not started.

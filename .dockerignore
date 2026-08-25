@@ -24,6 +24,9 @@ htmlcov/
 **/*.egg-info/
 **/node_modules/
 **/dist/
+ml/generated/
+ml/models/**
+!ml/models/.gitkeep
 
 # The frontend is built from its own context and is not needed by the backend.
 frontend/

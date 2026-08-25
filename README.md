@@ -44,3 +44,19 @@ Stage 4 adds read-only financial statements, revenue/expense summaries,
 historical receivables, liability-account payable exposure, customer history,
 cash receipts, and operational dashboard aggregates. Every value is derived
 from persisted posted accounting records and protected by `reports:read`.
+
+## Stage 5 offline ML
+
+Stage 5 adds four framework-independent pipelines under `ml/`: calibrated
+TF-IDF transaction classification, timestamp-safe Random Forest payment risk,
+deterministic harmonic cash-flow forecasting, and scaled K-Means customer
+segmentation. They use explicitly synthetic development data and are not wired
+to HTTP or the database yet.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\generate_ml_data.py --seed 42
+.\.venv\Scripts\python.exe scripts\train_ml.py
+```
+
+Generated CSVs and versioned artifacts are ignored by Git. See
+[docs/ML.md](docs/ML.md) and [STAGE_5_IMPLEMENTATION.md](STAGE_5_IMPLEMENTATION.md).

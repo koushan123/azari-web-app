@@ -13,6 +13,6 @@ backend/alembic/versions/__pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
-ml/models/*.joblib
-ml/models/*.json
+ml/models/**
 !ml/models/.gitkeep
+ml/generated/
