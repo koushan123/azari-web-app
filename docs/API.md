@@ -33,6 +33,16 @@ The API is rooted at `/api/v1`; interactive OpenAPI documentation is served at
 | GET | `/reports/cash-flow` | `reports:read` | Posted customer cash receipts by date |
 | GET | `/reports/parties/{id}/history` | `reports:read` | Party invoice/payment history |
 | GET | `/dashboard` | `reports:read` | Operational financial aggregates |
+| GET | `/ml/models` | `ml:read` | List safe registered-model metadata |
+| GET | `/ml/models/{pipeline}/active` | `ml:read` | Get the explicitly active version |
+| POST | `/ml/models/register` | `ml:manage` | Validate/register a controlled artifact identifier |
+| POST | `/ml/models/{id}/activate` | `ml:manage` | Atomically activate one pipeline version |
+| POST | `/ml/transactions/classify` | `ml:predict` | Classify text and persist the result |
+| POST | `/ml/payment-risk/predict` | `ml:predict` | Score an invoice from cutoff-safe history |
+| POST | `/ml/cash-flow/forecast` | `ml:predict` | Forecast 1–365 days from an as-of cutoff |
+| POST | `/ml/segmentation/predict` | `ml:predict` | Assign a customer using cutoff-safe behavior |
+| GET | `/ml/predictions[/{id}]` | `ml:read` | Read append-oriented prediction history |
+| POST | `/ml/predictions/{id}/feedback` | `ml:feedback` | Append feedback or a comment |
 
 Registration accepts `email`, `password`, `first_name`, and `last_name`. Extra
 fields are rejected, so callers cannot inject an ADMIN role. Passwords must be
@@ -48,3 +58,9 @@ Report endpoints accept ISO date filters. Statement/cash-flow endpoints accept
 `start_date` and `end_date`; balance sheet, receivables, payables, and dashboard
 accept `as_of`; receivables optionally accepts `customer_id`. Invalid ranges
 return 422. Draft/cancelled ledger activity is excluded as appropriate.
+
+Model responses expose versions and safe metadata but never artifact filesystem
+paths. Missing active models return 404, duplicate registration conflicts return
+409, invalid artifacts or prediction cutoffs return 422, and authentication or
+permission failures remain 401/403. Prediction inputs exclude credentials and
+are not stored wholesale.

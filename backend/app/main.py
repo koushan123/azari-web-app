@@ -7,6 +7,14 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.router import api_router
 from backend.app.core.config import get_settings
+from backend.app.ml.registry import (
+    ArtifactValidationError,
+    FeedbackConflictError,
+    MLIntegrationError,
+    ModelNotFoundError,
+    NoActiveModelError,
+    PredictionExecutionError,
+)
 from backend.app.services.accounting import AccountingError, ConflictError, NotFoundError
 
 
@@ -42,6 +50,20 @@ def create_app() -> FastAPI:
         elif isinstance(exc, ConflictError):
             code = status.HTTP_409_CONFLICT
         return JSONResponse(status_code=code, content={"detail": str(exc)})
+
+    @application.exception_handler(MLIntegrationError)
+    async def ml_error_handler(_: Request, exc: MLIntegrationError) -> JSONResponse:
+        code = status.HTTP_422_UNPROCESSABLE_CONTENT
+        if isinstance(exc, (ModelNotFoundError, NoActiveModelError)):
+            code = status.HTTP_404_NOT_FOUND
+        elif isinstance(exc, FeedbackConflictError):
+            code = status.HTTP_409_CONFLICT
+        elif isinstance(exc, PredictionExecutionError):
+            code = status.HTTP_503_SERVICE_UNAVAILABLE
+        message = str(exc)
+        if isinstance(exc, ArtifactValidationError):
+            message = "Model artifact is unavailable or incompatible"
+        return JSONResponse(status_code=code, content={"detail": message})
 
     return application
 

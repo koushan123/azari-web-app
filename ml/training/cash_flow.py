@@ -19,12 +19,17 @@ from ml.evaluation.metrics import regression_metrics
 
 
 def _design_matrix(offsets: np.ndarray) -> np.ndarray:
-    return np.column_stack([
-        offsets,
-        np.sin(2 * np.pi * offsets / 7), np.cos(2 * np.pi * offsets / 7),
-        np.sin(2 * np.pi * offsets / 30.5), np.cos(2 * np.pi * offsets / 30.5),
-        np.sin(2 * np.pi * offsets / 365.25), np.cos(2 * np.pi * offsets / 365.25),
-    ])
+    return np.column_stack(
+        [
+            offsets,
+            np.sin(2 * np.pi * offsets / 7),
+            np.cos(2 * np.pi * offsets / 7),
+            np.sin(2 * np.pi * offsets / 30.5),
+            np.cos(2 * np.pi * offsets / 30.5),
+            np.sin(2 * np.pi * offsets / 365.25),
+            np.cos(2 * np.pi * offsets / 365.25),
+        ]
+    )
 
 
 @dataclass(frozen=True)
@@ -44,15 +49,35 @@ class CashFlowModel:
     last_date: pd.Timestamp
     residual_std: float
 
-    def forecast(self, horizon: int) -> list[ForecastPoint]:
-        dates = pd.date_range(self.last_date + pd.Timedelta(1, unit="D"), periods=horizon, freq="D")
+    def predict_dates(
+        self, dates: pd.DatetimeIndex, level_adjustment: float = 0.0
+    ) -> np.ndarray:
         offsets = (dates - self.origin).days.to_numpy(dtype=float)
-        predictions = self.estimator.predict(_design_matrix(offsets))
+        return (
+            np.asarray(self.estimator.predict(_design_matrix(offsets)))
+            + level_adjustment
+        )
+
+    def forecast(
+        self,
+        horizon: int,
+        *,
+        as_of: pd.Timestamp | None = None,
+        level_adjustment: float = 0.0,
+    ) -> list[ForecastPoint]:
+        cutoff = self.last_date if as_of is None else pd.Timestamp(as_of)
+        dates = pd.date_range(
+            cutoff + pd.Timedelta(1, unit="D"), periods=horizon, freq="D"
+        )
+        predictions = self.predict_dates(dates, level_adjustment)
         interval = 1.96 * self.residual_std
         return [
             ForecastPoint(
-                date.date().isoformat(), float(value), float(value - interval),
-                float(value + interval), self.metadata.model_version,
+                date.date().isoformat(),
+                float(value),
+                float(value - interval),
+                float(value + interval),
+                self.metadata.model_version,
             )
             for date, value in zip(dates, predictions, strict=True)
         ]
@@ -62,8 +87,12 @@ def _fit(frame: pd.DataFrame) -> tuple[LinearRegression, pd.Timestamp, float]:
     ordered = frame.sort_values("date")
     origin = pd.Timestamp(ordered["date"].iloc[0])
     offsets = (pd.to_datetime(ordered["date"]) - origin).dt.days.to_numpy(dtype=float)
-    estimator = LinearRegression().fit(_design_matrix(offsets), ordered["net_cash_flow"])
-    residuals = ordered["net_cash_flow"].to_numpy() - estimator.predict(_design_matrix(offsets))
+    estimator = LinearRegression().fit(
+        _design_matrix(offsets), ordered["net_cash_flow"]
+    )
+    residuals = ordered["net_cash_flow"].to_numpy() - estimator.predict(
+        _design_matrix(offsets)
+    )
     return estimator, origin, float(np.std(residuals, ddof=1))
 
 
@@ -77,7 +106,10 @@ def chronological_backtest_split(
 
 
 def train_cash_flow_model(
-    data: pd.DataFrame, *, seed: int, horizon: int = 30,
+    data: pd.DataFrame,
+    *,
+    seed: int,
+    horizon: int = 30,
     model_version: str = "cash-flow-v1",
 ) -> tuple[CashFlowModel, dict[str, float]]:
     ordered = data.sort_values("date").reset_index(drop=True)
@@ -88,19 +120,31 @@ def train_cash_flow_model(
     metrics = regression_metrics(test["net_cash_flow"], predicted)
     estimator, origin, residual_std = _fit(ordered)
     metadata = make_metadata(
-        pipeline="cash_flow_forecast", model_version=model_version, data=data,
-        features=["date", "net_cash_flow"], seed=seed,
-        config={"horizon": horizon, "algorithm": "harmonic_linear_regression_prophet_fallback"},
+        pipeline="cash_flow_forecast",
+        model_version=model_version,
+        data=data,
+        features=["date", "net_cash_flow"],
+        seed=seed,
+        config={
+            "horizon": horizon,
+            "algorithm": "harmonic_linear_regression_prophet_fallback",
+        },
         metrics=metrics,
     )
     return CashFlowModel(
-        estimator, metadata, origin, pd.Timestamp(ordered["date"].iloc[-1]), residual_std
+        estimator,
+        metadata,
+        origin,
+        pd.Timestamp(ordered["date"].iloc[-1]),
+        residual_std,
     ), metrics
 
 
 def save_cash_flow_model(model: CashFlowModel, path: Path) -> None:
     state = {
-        "estimator": model.estimator, "origin": model.origin, "last_date": model.last_date,
+        "estimator": model.estimator,
+        "origin": model.origin,
+        "last_date": model.last_date,
         "residual_std": model.residual_std,
     }
     save_artifact(path, state, model.metadata)
@@ -111,5 +155,9 @@ def load_cash_flow_model(path: Path) -> CashFlowModel:
         path, pipeline="cash_flow_forecast", expected_features=["date", "net_cash_flow"]
     )
     return CashFlowModel(
-        state["estimator"], metadata, state["origin"], state["last_date"], state["residual_std"]
+        state["estimator"],
+        metadata,
+        state["origin"],
+        state["last_date"],
+        state["residual_std"],
     )

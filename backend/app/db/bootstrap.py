@@ -16,6 +16,9 @@ PERMISSIONS = {
     "reports:read": "View financial reports",
     "ml:read": "View machine-learning results",
     "ml:train": "Train machine-learning models",
+    "ml:predict": "Run registered machine-learning models",
+    "ml:manage": "Register and activate machine-learning models",
+    "ml:feedback": "Submit machine-learning prediction feedback",
     "parties:read": "View parties",
     "parties:write": "Create and update parties",
     "products:read": "View products",
@@ -59,9 +62,15 @@ ACCOUNTING_WRITE = ACCOUNTING_READ | {
 
 ROLE_PERMISSIONS = {
     "ADMIN": set(PERMISSIONS),
-    "ACCOUNTANT": {"accounting:read", "accounting:write", "reports:read", "ml:read"}
+    "ACCOUNTANT": {
+        "accounting:read", "accounting:write", "reports:read", "ml:read",
+        "ml:predict", "ml:feedback",
+    }
     | ACCOUNTING_WRITE,
-    "MANAGER": {"users:read", "accounting:read", "reports:read", "ml:read"} | ACCOUNTING_READ,
+    "MANAGER": {
+        "users:read", "accounting:read", "reports:read", "ml:read",
+        "ml:predict", "ml:feedback",
+    } | ACCOUNTING_READ,
     "VIEWER": {"accounting:read", "reports:read", "ml:read"} | ACCOUNTING_READ,
 }
 

@@ -32,6 +32,53 @@ tables. `ReportingService` applies accounting normal-balance semantics,
 historical as-of allocation logic, filters, and response composition. Reports
 never create ledger state and never duplicate posting rules.
 
+Stage 6 adds an application-integrated ML slice while preserving the offline
+Stage 5 package:
+
+```text
+protected /api/v1/ml route
+  -> MLService
+  -> MLRepository + ArtifactRegistry/ModelCache
+  -> active Stage 5 artifact
+  -> append-only prediction/feedback + audit event
+```
+
+Routes never load joblib files, engineer features, query accounting tables for
+ML logic, or train models. `MLService` builds point-in-time features from
+repository data and owns prediction persistence. `ArtifactRegistry` resolves
+only controlled identifiers beneath `ML_MODEL_DIR`, validates artifact and
+feature schemas plus dependency major versions, and returns safe errors.
+`ModelCache` is lock-protected and keyed by registry UUID. Every inference
+request first resolves the active database row; activation invalidates that
+pipeline's cache, so an old artifact cannot silently remain active.
+
+Model training remains an explicit offline operation. Registration records an
+already-trained artifact. Activation selects exactly one production version per
+pipeline. Inference never trains. Feedback appends a correction or verification
+to an immutable prediction rather than rewriting model output.
+
+Stage 7 adds a typed React presentation layer without changing those backend
+boundaries:
+
+```text
+Persian route/page -> typed API service -> existing /api/v1 contract
+                  -> auth/permission context + shared UI/date/format utilities
+```
+
+The client keeps authentication, HTTP/error translation, permission checks,
+theme/calendar preference, navigation, and formatting centralized. Page
+components never own JWT signing material or accounting invariants. UI
+permissions improve usability while the FastAPI dependency remains the security
+boundary. Monetary totals shown in forms are previews only; persisted totals,
+status transitions, posting, and allocations remain backend-authoritative.
+
+The document root and component layout are RTL. Desktop uses grouped top
+navigation; widths below 1220px use a right-side drawer. Tables become labeled
+record cards on small screens, while printable reports retain tabular layout.
+IRANSans is a preferred local font name only—no unlicensed font asset is shipped.
+The Borkowski Jalali conversion from the MIT-licensed `jalaali-js` project is
+vendored with attribution; API dates remain ISO Gregorian.
+
 Compose performs development migration/bootstrap explicitly. The image default
 does not mutate schema, and production deployment can run migrations as a
 separate controlled job.

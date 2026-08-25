@@ -42,3 +42,21 @@ Financial statements include POSTED journals only.
 Historical receivables sum POSTED allocations whose payment date is on or
 before the requested `as_of` date rather than using the invoice's current paid
 total.
+
+Stage 6 migration `20260825_0003` adds:
+
+- `ml_model_versions`: pipeline/version registry, controlled artifact
+  identifier, artifact/feature schemas, fingerprint, training configuration,
+  metrics, dependencies, synthetic flag, activation state and actor/timestamps;
+- `ml_predictions`: append-oriented model reference, pipeline, safe source
+  reference, structured output, confidence/review state, model-level
+  explanation, requester, and prediction timestamp;
+- `ml_prediction_feedback`: append-only verified/corrected values or comments,
+  submitter, and submission timestamp.
+
+PostgreSQL stores structured fields as JSONB. Named checks constrain pipeline,
+confidence, and feedback type. A partial unique index permits only one active
+model per pipeline. Additional indexes cover active lookup, prediction
+pipeline/time, model reference, source reference, and feedback lookup. Foreign
+keys use `RESTRICT` for model/prediction history and `SET NULL` for deleted user
+references. No prediction or feedback mutation/deletion API exists.

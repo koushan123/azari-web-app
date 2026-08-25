@@ -13,6 +13,9 @@ def test_stage_two_tables_and_constraints_exist() -> None:
         "user_roles",
         "role_permissions",
         "audit_events",
+        "ml_model_versions",
+        "ml_predictions",
+        "ml_prediction_feedback",
     } <= set(inspector.get_table_names())
     assert any(
         item["name"] == "uq_users_email" for item in inspector.get_unique_constraints("users")

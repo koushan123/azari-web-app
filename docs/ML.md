@@ -1,8 +1,8 @@
 # Machine Learning
 
-Stage 5 is an offline, framework-independent package. It imports neither
-FastAPI nor SQLAlchemy. Normal backend startup loads no model and performs no
-training; Stage 6 will own web/database integration.
+Stage 5 remains an offline, framework-independent package that imports neither
+FastAPI nor SQLAlchemy. Stage 6 integrates its saved artifacts through backend
+application adapters; normal startup and request handling never train models.
 
 ## Pipelines
 
@@ -76,3 +76,32 @@ payment-risk test accuracy 0.8167/F1 0.6024/ROC AUC 0.8192; cash-flow MAE
 **DEMO/SYNTHETIC METRICS, not real-world model performance**. Before production,
 models require representative data, calibrated business thresholds, drift and
 bias monitoring, forecast diagnostics, security review, and human validation.
+
+## Stage 6 lifecycle
+
+The lifecycle has four deliberately separate operations:
+
+1. **Training:** `scripts/train_ml.py` produces a versioned artifact offline.
+2. **Registration:** an `ml:manage` caller supplies a controlled identifier such
+   as `transaction/transaction-v1`. The application resolves it only under
+   `ML_MODEL_DIR`, validates metadata/schema/features/runtime compatibility,
+   and stores metadata without returning a filesystem path.
+3. **Inference:** an `ml:predict` caller uses the single active registry version.
+   A thread-safe per-process cache avoids loading joblib for every request;
+   activation invalidates the affected pipeline.
+4. **Feedback:** an `ml:feedback` caller appends a verified value, correction,
+   or comment. The original prediction is never overwritten.
+
+Transaction text is not persisted; only its optional source reference and
+prediction are stored. Payment risk uses invoice/customer history visible at
+the requested cutoff. Cash-flow inference uses posted payments through the
+cutoff for a level adjustment without retraining. Segmentation aggregates
+customer invoices and posted allocations through the cutoff. Risk signals are
+explicitly model-level heuristics, not causal explanations.
+
+The persisted cash-flow adjustment currently reflects posted customer receipts
+only; supplier cash outflows require the future payable-payment workflow.
+
+Registry and management errors never expose artifact paths or loader stack
+traces. Synthetic artifacts remain clearly marked and must not be interpreted
+as production-quality models merely because they can be registered.
