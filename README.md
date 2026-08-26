@@ -16,6 +16,10 @@ permission-aware accounting workflows, statements and operational dashboard,
 dual Jalali/Gregorian dates, responsive navigation, light/dark themes, and all
 four Stage 6 AI workflows. Open it at `http://localhost:4173` after startup.
 
+Stage 8 completes the production-readiness pass: accounting/API integration,
+security and log review, Persian/mobile/accessibility fixes, all four live ML
+workflows, restart persistence, and a non-root backend image.
+
 ## Quick start
 
 1. Copy `.env.example` to `.env` and replace every `change-me` value.
@@ -88,3 +92,12 @@ dark theme and calendar choice persist locally.
 Frontend developer and test commands are in [frontend/README.md](frontend/README.md).
 Implementation and verification details are in
 [STAGE_7_IMPLEMENTATION.md](STAGE_7_IMPLEMENTATION.md).
+
+## Stage 8 production readiness
+
+The Stage 8 suite verifies accounting reconciliation and rollback, API
+authentication/RBAC, reports, all registered ML pipelines, feedback and
+low-confidence review, responsive Persian presentation, Compose health,
+migrations, and persisted data after restart. Remaining synthetic-ML and
+product-scope limitations are explicit in
+[STAGE_8_IMPLEMENTATION.md](STAGE_8_IMPLEMENTATION.md).

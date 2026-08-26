@@ -72,6 +72,12 @@ permissions improve usability while the FastAPI dependency remains the security
 boundary. Monetary totals shown in forms are previews only; persisted totals,
 status transitions, posting, and allocations remain backend-authoritative.
 
+Stage 8 keeps those boundaries intact. Manual-journal reversal now enforces
+single reversal and source ownership in the accounting service, so a generic
+operation cannot detach invoice/payment state from its generated ledger entry.
+The backend container runs migration, bootstrap, and Uvicorn as the dedicated
+unprivileged `azari` user.
+
 The document root and component layout are RTL. Desktop uses grouped top
 navigation; widths below 1220px use a right-side drawer. Tables become labeled
 record cards on small screens, while printable reports retain tabular layout.

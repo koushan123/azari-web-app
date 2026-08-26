@@ -5,7 +5,7 @@ export class ApiError extends Error { constructor(public readonly status: number
 let tokenProvider: () => string | null = () => sessionStorage.getItem("azari_token");
 let unauthorizedHandler: (() => void) | undefined;
 export function configureApi(getToken: () => string | null, onUnauthorized: () => void) { tokenProvider = getToken; unauthorizedHandler = onUnauthorized; }
-function friendlyMessage(status: number, body?: ApiErrorBody) { if (status === 422 && Array.isArray(body?.detail)) { const detail = body.detail.map((item) => item.msg).filter(Boolean).join("، "); return detail || messages[status]; } return messages[status] ?? "ارتباط با سرور ناموفق بود."; }
+function friendlyMessage(status: number, _body?: ApiErrorBody) { return messages[status] ?? "ارتباط با سرور ناموفق بود."; }
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers); if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const token = tokenProvider(); if (token) headers.set("Authorization", `Bearer ${token}`);

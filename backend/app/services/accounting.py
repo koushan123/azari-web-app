@@ -260,6 +260,21 @@ class AccountingService:
         original = self._get(JournalEntry, journal_id)
         if original.status != "POSTED":
             raise ConflictError("Only posted journals can be reversed")
+        if original.reversal_of_id is not None:
+            raise ConflictError("Reversal journals cannot be reversed")
+        existing_reversal = self.session.scalar(
+            select(JournalEntry).where(JournalEntry.reversal_of_id == original.id)
+        )
+        if existing_reversal is not None:
+            raise ConflictError("Journal has already been reversed")
+        invoice_source = self.session.scalar(
+            select(Invoice.id).where(Invoice.journal_id == original.id)
+        )
+        payment_source = self.session.scalar(
+            select(Payment.id).where(Payment.journal_id == original.id)
+        )
+        if invoice_source is not None or payment_source is not None:
+            raise ConflictError("Source-document journals cannot be reversed directly")
         reversal = JournalEntry(
             entry_number=f"REV-{original.entry_number}",
             entry_date=original.entry_date,

@@ -13,6 +13,7 @@ The Compose backend command waits for healthy PostgreSQL, runs
 `alembic upgrade head`, idempotently seeds canonical roles/permissions, and then
 starts Uvicorn. The image default itself only starts Uvicorn so migration policy
 can be controlled independently outside the development Compose environment.
+All three backend commands run as the image's unprivileged `azari` user.
 
 The Persian frontend is available at `http://localhost:4173`; the API is at
 `http://localhost:8100/api/v1`. The browser uses the host API URL while

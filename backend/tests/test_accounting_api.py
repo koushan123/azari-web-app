@@ -102,3 +102,13 @@ def test_accounting_api_crud_post_and_reverse(client: TestClient) -> None:
     assert posted.status_code == 200 and posted.json()["status"] == "POSTED"
     reversal = client.post(f"/api/v1/journals/{journal.json()['id']}/reverse", headers=headers)
     assert reversal.status_code == 201 and reversal.json()["reversal_of_id"] == journal.json()["id"]
+    assert (
+        client.post(f"/api/v1/journals/{journal.json()['id']}/reverse", headers=headers).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/v1/journals/{reversal.json()['id']}/reverse", headers=headers
+        ).status_code
+        == 409
+    )

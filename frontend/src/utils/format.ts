@@ -11,3 +11,12 @@ export const STATUS_LABELS: Record<string, string> = { ACTIVE: "فعال", INACT
 export const statusLabel = (value: string) => STATUS_LABELS[value.toUpperCase()] ?? value;
 export const ACCOUNT_TYPE_LABELS: Record<string, string> = { ASSET: "دارایی", LIABILITY: "بدهی", EQUITY: "حقوق مالکانه", REVENUE: "درآمد", EXPENSE: "هزینه" };
 export const PIPELINE_LABELS: Record<string, string> = { transaction_classification: "طبقه‌بندی تراکنش", payment_delay_risk: "ریسک تأخیر پرداخت", cash_flow_forecast: "پیش‌بینی جریان نقدی", customer_segmentation: "بخش‌بندی مشتریان" };
+export const TRANSACTION_CATEGORY_LABELS: Record<string, string> = { office_supplies: "لوازم اداری", travel: "سفر", utilities: "آب و برق و خدمات", meals: "پذیرایی", software: "نرم‌افزار" };
+export const RISK_SIGNAL_LABELS: Record<string, string> = { amount: "مبلغ فاکتور", prior_invoice_count: "تعداد فاکتورهای پیشین", prior_average_amount: "میانگین مبلغ فاکتورهای پیشین", prior_average_delay: "میانگین تأخیر پیشین", prior_late_rate: "نرخ تأخیر پیشین", prior_paid_amount: "مبلغ پرداخت‌شده پیشین", prior_invoice_frequency: "تناوب صدور فاکتور", prior_payment_frequency: "تناوب پرداخت", outstanding_at_prediction: "مانده باز در زمان تحلیل", customer_tenure_days: "مدت سابقه مشتری" };
+const SEGMENT_TERM_LABELS: Record<string, string> = { "high-value": "ارزش بالا", "lower-value": "ارزش پایین‌تر", "slow-paying": "پرداخت کند", "reliable-paying": "پرداخت منظم", "high-outstanding": "مانده باز بالا", "low-outstanding": "مانده باز پایین" };
+export const transactionCategoryLabel = (value: string) => TRANSACTION_CATEGORY_LABELS[value] ?? "سایر";
+export const riskSignalLabel = (value: string) => RISK_SIGNAL_LABELS[value] ?? "نشانه مدل";
+export const explanationScopeLabel = (value: string) => value === "model-level heuristic" ? "برآورد اکتشافی در سطح مدل" : "توضیح در سطح مدل";
+export const segmentDescriptionLabel = (value: string) => { const terms = value.replace(/ customers$/, "").split(", "); return terms.every((term) => term in SEGMENT_TERM_LABELS) ? terms.map((term) => SEGMENT_TERM_LABELS[term]).join("، ") : "الگوی رفتاری مشتری"; };
+const PAYMENT_METHOD_LABELS: Record<string, string> = { bank: "انتقال بانکی", transfer: "انتقال بانکی", card: "کارت‌خوان", cash: "نقدی", cheque: "چک", check: "چک", "انتقال بانکی": "انتقال بانکی", "کارت‌خوان": "کارت‌خوان", "نقدی": "نقدی", "چک": "چک" };
+export const paymentMethodLabel = (value: string) => PAYMENT_METHOD_LABELS[value.toLowerCase()] ?? "روش دیگر";

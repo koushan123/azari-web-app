@@ -305,11 +305,29 @@ registration/activation, and all four inference workflows. No mock financial or
 AI values were added. The frontend documents the existing lack of supplier-level
 payable detail instead of inventing it.
 
-Frontend type checking and production build pass; 11 focused frontend tests
+Frontend type checking and production build pass; 12 focused frontend tests
 pass. The complete 67-test backend/ML suite, Ruff, strict mypy, Compose config,
 the rebuilt frontend container, three-service runtime, PostgreSQL/backend health,
 both host HTTP checks, and `git diff --check` pass. A separate uncached rebuild
 of the unchanged backend image was attempted twice and was blocked by host
 outbound timeouts to PyPI; the already verified Stage 6 backend image remained
 healthy in the final runtime. See `STAGE_7_IMPLEMENTATION.md` for full evidence.
-Stage 8 was not started.
+Stage 8 is described below.
+
+## Stage 8 — Production readiness and hardening
+
+Stage 8 is **PASS WITH DOCUMENTED LIMITATIONS**. It closes a high-severity
+ledger/source consistency hole by rejecting generic reversal of journals owned
+by invoices or payments, and makes other invalid reversal cases explicit. It
+also hardens frontend RBAC reflection, Persian presentation, mobile table
+context, validation errors, modal keyboard focus, and the backend container's
+non-root execution.
+
+The final suite passes 68 backend/ML tests at 96% coverage, Ruff, strict mypy
+across 91 files, 17 frontend tests, TypeScript, and the production build. Clean
+Compose rebuild, Alembic head/no-drift, host and container health, live
+accounting reconciliation, 401/403 RBAC, all four ML APIs, feedback,
+low-confidence review, restart persistence, and audit/log safety passed. The
+npm advisory endpoint was unavailable due to an external connection reset;
+synthetic-model fitness and documented product gaps remain limitations. See
+`STAGE_8_IMPLEMENTATION.md`. Stage 9 has not started.

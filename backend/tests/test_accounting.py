@@ -129,6 +129,21 @@ def test_balanced_posting_and_reversal_preserve_original() -> None:
         assert journal.lines[0].debit == Decimal("100")
 
 
+def test_reversal_cannot_be_repeated_or_reversed() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        original = service.create_journal(journal_data(values))
+        service.post_journal(original.id)
+        reversal = service.reverse_journal(original.id)
+
+        with pytest.raises(ConflictError, match="already been reversed"):
+            service.reverse_journal(original.id)
+        with pytest.raises(ConflictError, match="cannot be reversed"):
+            service.reverse_journal(reversal.id)
+
+        assert len(session.scalars(select(JournalEntry)).all()) == 2
+
+
 @pytest.mark.parametrize(
     ("debit", "credit", "one_line", "message"),
     [
@@ -205,6 +220,8 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
         assert issued.status == "ISSUED"
         assert issued.journal is not None
         assert sum(line.debit for line in issued.journal.lines) == issued.total
+        with pytest.raises(ConflictError, match="Source-document"):
+            service.reverse_journal(issued.journal.id)
         failed = service.create_invoice(invoice_data(values, "I-2"))
         values.revenue.is_active = False
         session.commit()
@@ -267,6 +284,8 @@ def test_partial_and_full_payments_post_through_same_ledger() -> None:
         assert sum(line.debit for line in second.journal.lines) == sum(
             line.credit for line in second.journal.lines
         )
+        with pytest.raises(ConflictError, match="Source-document"):
+            service.reverse_journal(second.journal.id)
 
 
 def test_payment_overallocation_invalid_sum_and_cancelled_invoice_fail() -> None:
