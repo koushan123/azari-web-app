@@ -3,6 +3,7 @@ export type Money = string;
 export type PipelineName = "transaction_classification" | "payment_delay_risk" | "cash_flow_forecast" | "customer_segmentation";
 export interface User { id: UUID; email: string; first_name: string; last_name: string; is_active: boolean; created_at: string; updated_at: string; last_login_at: string | null; roles: string[]; permissions: string[] }
 export interface TokenResponse { access_token: string; token_type: string }
+export interface RegisterRequest { email: string; password: string; first_name: string; last_name: string }
 export interface Party { id: UUID; name: string; email: string | null; phone: string | null; address: string | null; is_customer: boolean; is_supplier: boolean; is_active: boolean; created_at: string; updated_at: string }
 export interface Product { id: UUID; sku: string; name: string; description: string | null; unit: string; unit_price: Money; is_active: boolean; created_at: string; updated_at: string }
 export interface AccountCategory { id: UUID; name: string; account_type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE" }

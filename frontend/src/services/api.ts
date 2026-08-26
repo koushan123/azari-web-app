@@ -1,4 +1,4 @@
-import type { ApiErrorBody, TokenResponse, User } from "../types/api";
+import type { ApiErrorBody, RegisterRequest, TokenResponse, User } from "../types/api";
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8100/api/v1";
 const messages: Record<number, string> = { 400: "اطلاعات درخواست نامعتبر است.", 401: "نشست شما پایان یافته است. لطفاً دوباره وارد شوید.", 403: "شما اجازه انجام این عملیات را ندارید.", 404: "اطلاعات درخواستی پیدا نشد.", 409: "این عملیات با وضعیت فعلی اطلاعات سازگار نیست.", 422: "لطفاً اطلاعات واردشده را بررسی کنید.", 500: "خطایی در سرور رخ داده است. کمی بعد دوباره تلاش کنید.", 503: "سرویس موردنظر اکنون در دسترس نیست." };
 export class ApiError extends Error { constructor(public readonly status: number, message: string, public readonly body?: ApiErrorBody) { super(message); this.name = "ApiError"; } }
@@ -15,6 +15,6 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   return body as T;
 }
 export function query(path: string, params: Record<string, string | undefined | null>) { const search = new URLSearchParams(); Object.entries(params).forEach(([key, value]) => { if (value) search.set(key, value); }); return `${path}${search.size ? `?${search}` : ""}`; }
-export const api = { get: <T>(path: string) => request<T>(path), post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), patch: <T>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }), login: (email: string, password: string) => request<TokenResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }), headers: { "Content-Type": "application/json" } }), me: () => request<User>("/auth/me") };
+export const api = { get: <T>(path: string) => request<T>(path), post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), patch: <T>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }), register: (data: RegisterRequest) => request<User>("/auth/register", { method: "POST", body: JSON.stringify(data), headers: { "Content-Type": "application/json" } }), login: (email: string, password: string) => request<TokenResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }), headers: { "Content-Type": "application/json" } }), me: () => request<User>("/auth/me") };
 export interface HealthResponse { status: "ok"; service: string; timestamp: string }
 export const getHealth = (signal?: AbortSignal) => request<HealthResponse>("/health", { signal });
