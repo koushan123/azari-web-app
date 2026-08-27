@@ -56,8 +56,8 @@ balanced journal posting engine. See [STAGE_3_IMPLEMENTATION.md](STAGE_3_IMPLEME
 Stage 4 adds read-only financial statements, revenue/expense summaries,
 historical receivables, liability-account payable exposure, customer history,
 cash receipts, and operational dashboard aggregates protected by
-`reports:read`. The current receivables query also includes draft invoices; see
-the handbook's known-limitations section.
+`reports:read`. Receivables and dashboard totals include only issued accounting
+documents; draft invoices do not affect posted financial values.
 
 ## Stage 5 offline ML
 
@@ -90,7 +90,7 @@ are ADMIN-only through `ml:manage`. See
 The React application is now a Persian business interface rather than a
 technical health shell. It uses the existing JWT and RBAC contracts, sends all
 accounting and report data through the versioned API, and never substitutes
-sample values for absent records. Desktop navigation uses a sidebar; narrower
+sample values for absent records. Desktop navigation uses the top bar; narrower
 tablet and mobile layouts use a right-side drawer. Light is the default theme and the
 dark theme and calendar choice persist locally.
 

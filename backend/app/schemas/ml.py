@@ -41,7 +41,7 @@ class ModelVersionResponse(BaseModel):
 
 
 class TransactionClassifyRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     description: str = Field(min_length=3, max_length=500)
     source_reference: str | None = Field(default=None, max_length=100)
 

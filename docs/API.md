@@ -6,6 +6,7 @@ The API is rooted at `/api/v1`; interactive OpenAPI documentation is served at
 | Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
 | GET | `/health` | Public | Process liveness; does not query dependencies |
+| GET | `/ready` | Public | Readiness; succeeds only when PostgreSQL is reachable |
 | POST | `/auth/register` | Public | Create a normalized VIEWER account |
 | POST | `/auth/login` | Public | Exchange JSON email/password for a bearer token |
 | GET | `/auth/me` | Authenticated | Return the safe current-user representation |

@@ -397,7 +397,7 @@ flowchart LR
     J --> U[Update invoice amount_paid and status]
 ```
 
-A payment is currently a customer receipt, despite the generic name. Its allocations must sum exactly to its positive amount, cannot duplicate an invoice, cannot cross customers, and cannot exceed each current invoice balance. Posting rechecks balances inside the transaction, posts `PAY-{reference}`, updates invoice paid amounts/statuses, and links the journal atomically. Concurrent or repeated posting is protected by status checks, unique references/links, database constraints, and rollback. There are no outgoing supplier payments, unallocated receipts, payment cancellation, or account-type validation on selected cash/receivable accounts.
+A payment is currently a customer receipt, despite the generic name. Its allocations must sum exactly to its positive amount, cannot duplicate an invoice, cannot cross customers, and cannot exceed each current invoice balance. Posting locks the payment and all allocated invoice rows in deterministic order, rechecks status and balances, requires distinct active ASSET cash/receivable accounts, and requires the receivable account to match each source invoice. It then posts `PAY-{reference}`, updates invoice paid amounts/statuses, and links the journal atomically. Concurrent or repeated posting is protected by those row locks, state checks, unique references/links, database constraints, and rollback. There are no outgoing supplier payments, unallocated receipts, or payment cancellation.
 
 ## 8. Reports and dashboard
 
@@ -417,7 +417,7 @@ All ledger-based statements read only `POSTED` journal entries. Date ranges are 
 
 Normal balance presentation is debit for assets/expenses and credit for liabilities/equity/revenue. The balance sheet includes calculated current earnings so the equation can be evaluated without closing revenue/expense accounts.
 
-**Verified current defect:** the receivables query excludes only `CANCELLED` invoices, so it includes `DRAFT` invoices as well as issued/partially paid/paid invoices. Dashboard outstanding and overdue figures reuse that query. Therefore creating draft invoices can make dashboard numbers keep increasing even though no journal was posted. Refreshing the dashboard itself is read-only and does not create numbers. This is a source-code contradiction with the intended accounting rule; it is documented here and not changed by this documentation task.
+Receivables include only `ISSUED`, `PARTIALLY_PAID`, and still-outstanding `PAID` history. `DRAFT` and `CANCELLED` invoices are excluded, and dashboard outstanding/overdue values reuse the same rule. Creating or viewing a draft and refreshing the dashboard are therefore read-only with respect to posted financial values.
 
 Reports return complete result sets without pagination. “Payables” and “cash flow” should be interpreted narrowly as described above.
 
@@ -498,7 +498,7 @@ All paths below are under `/api/v1`. A public route is explicitly identified; ev
 
 | Area | Method and path | Permission / purpose |
 |---|---|---|
-| Health | `GET /health` | Public readiness response |
+| Health | `GET /health`, `GET /ready` | Public process liveness and PostgreSQL-backed readiness |
 | Auth | `POST /auth/register`, `POST /auth/login` | Public registration/login |
 | Auth | `GET /auth/me` | Any authenticated user |
 | Users | `GET /users` | `users:read` |
@@ -522,10 +522,10 @@ All paths below are under `/api/v1`. A public route is explicitly identified; ev
 
 Pydantic structural/field errors normally return 422. Domain missing records return 404, conflicting state/uniqueness returns 409, unauthenticated/invalid/inactive identity returns 401, and missing permission returns 403.
 
-### 10.1 Exact route inventory (56 operations)
+### 10.1 Exact route inventory (57 operations)
 
 ```text
-PUBLIC/AUTH  GET /health; POST /auth/register; POST /auth/login; GET /auth/me
+PUBLIC/AUTH  GET /health; GET /ready; POST /auth/register; POST /auth/login; GET /auth/me
 USERS        GET /users [users:read]
 
 PARTIES      POST /parties [write]; GET /parties [read]
@@ -563,7 +563,7 @@ In the accounting groups, bracketed `read`, `write`, `post`, `issue`, and `manag
 
 ## 11. Frontend behavior
 
-The document root is Persian (`lang=fa`) and RTL. The application has a responsive sidebar/drawer, mobile card layouts, modal/bottom-sheet forms, reusable loading/empty/error states, a light/dark theme stored in `localStorage`, and a Jalali/Gregorian display preference (Jalali by default). Dates are still transported to the API as ISO Gregorian values. Charts are small native CSS/SVG components, not a charting library.
+The document root is Persian (`lang=fa`) and RTL. The application has grouped top navigation on desktop and a right-side drawer on mobile, mobile card layouts, modal/bottom-sheet forms, reusable loading/empty/error states, a light/dark theme stored in `localStorage`, and a Jalali/Gregorian display preference (Jalali by default). Dates are still transported to the API as ISO Gregorian values. Charts are small native CSS/SVG components, not a charting library.
 
 UI language/direction is not a database encoding or API format: labels are Persian and layout is RTL, financial digits deliberately render as English/Latin digits, the selected calendar controls display/input conversion, API dates remain ISO Gregorian, JSON field/enum names remain the English contracts, and PostgreSQL stores Unicode text without translating it.
 
@@ -609,13 +609,13 @@ flowchart LR
     DB --> H[pg_isready healthy]
     H --> M[Backend: alembic upgrade head]
     M --> B[Seed roles/permissions + optional admin]
-    B --> U[Uvicorn :8000 and /health healthy]
-    U --> N[Nginx frontend :80]
+    B --> U[Uvicorn :8000 and /ready healthy]
+    U --> N[Nginx frontend :80 and HTTP health]
 ```
 
 The backend image installs the project including ML dependencies, copies the controlled model tree, and runs as a non-root system user. The frontend is built in Node 22 Alpine and served by Nginx. Ignore files exclude Python caches, virtual environments, secrets, Node modules/builds, Git data, and generated model payloads without excluding required source or lock files.
 
-An **image** is the immutable built template; a **container** is one running instance. Compose builds/starts the instances on one private **network**, where service DNS names such as `db` work. The named `postgres_data` **volume** outlives a recreated database container, while the ML model bind mount exposes the controlled host artifact directory to `/app/ml/models`. Healthchecks do more than show status: `depends_on` delays backend until PostgreSQL is healthy and frontend until backend is healthy.
+An **image** is the immutable built template; a **container** is one running instance. Compose builds/starts the instances on one private **network**, where service DNS names such as `db` work. The named `postgres_data` **volume** outlives a recreated database container, while the ML model bind mount exposes the controlled host artifact directory read-only at `/app/ml/models`. Healthchecks do more than show status: `depends_on` delays backend until PostgreSQL is healthy and frontend until database-backed backend readiness succeeds; nginx also has its own HTTP healthcheck.
 
 ### 12.3 Environment variables
 
@@ -652,6 +652,7 @@ docker compose config
 docker compose up -d --build
 docker compose ps
 curl http://localhost:8100/api/v1/health
+curl http://localhost:8100/api/v1/ready
 curl http://localhost:4173
 
 pytest backend/tests --cov=backend.app
@@ -710,24 +711,22 @@ Stage files are historical evidence. Statements such as “the next stage has no
 | Deferred but evidenced by gaps | Supplier bills/outgoing payments, role mutation, token refresh/recovery/MFA/rate limiting, pagination, distributed cache invalidation, automated retraining, real-data model validation, browser E2E |
 | Future work, not a current promise | Any additional ERP domain such as inventory, payroll, multi-company, tax filing, currencies or bank reconciliation requires explicit design before implementation |
 
-1. Draft invoices are counted as receivables/dashboard outstanding; intended behavior normally starts at issue.
-2. Self-registration creates a read-only Viewer, so a new user cannot add an invoice without role assignment.
-3. IRANSans is named but not bundled, so typography depends on host fonts/fallbacks.
-4. Supplier bills and supplier payments are absent; payables are liability-ledger exposure only.
-5. Cash flow is posted customer-receipt inflow only; outflows are always zero.
-6. Invoice tax is credited with revenue rather than a tax-liability account.
-7. Invoice/payment posting does not enforce semantic account types selected by the caller.
-8. No invoice/journal/payment editing, deletion, cancellation workflow, or credit notes are exposed.
-9. No multi-company/tenant isolation, currencies, exchange rates, warehouses, or inventory movements.
-10. No pagination for operational lists, reports, predictions, or users.
-11. No refresh tokens, MFA, password reset, email verification, token revocation, or rate limiting.
-12. Roles and users cannot be managed through mutation APIs/UI; the users page is read-only.
-13. ML is trained on synthetic data and must not be treated as production-validated decision support.
-14. Model cache is process-local; workers do not share invalidation state.
-15. Feedback does not trigger training and there is no API training endpoint despite a seeded `ml:train` permission.
-16. Payment-risk direct API calls do not enforce issued/partial invoice status as strictly as the UI.
-17. Segmentation cannot score customers without sufficient history.
-18. Forecasting has no outgoing cash or exogenous drivers and uses approximate intervals.
+1. Self-registration creates a read-only Viewer, so a new user cannot add an invoice without role assignment.
+2. IRANSans is named but not bundled, so typography depends on host fonts/fallbacks.
+3. Supplier bills and supplier payments are absent; payables are liability-ledger exposure only.
+4. Cash flow is posted customer-receipt inflow only; outflows are always zero.
+5. The specification defines invoice tax as part of the amount credited to revenue; there is no separate tax-liability engine.
+6. Account categories enforce ASSET receivable/cash and REVENUE invoice destinations, but there is no finer control-account designation inside ASSET.
+7. No invoice/journal/payment editing, deletion, cancellation workflow, or credit notes are exposed.
+8. No multi-company/tenant isolation, currencies, exchange rates, warehouses, or inventory movements.
+9. No pagination for operational lists, reports, predictions, or users.
+10. No refresh tokens, MFA, password reset, email verification, token revocation, or rate limiting.
+11. Roles and users cannot be managed through mutation APIs/UI; the users page is read-only.
+12. ML is trained on synthetic data and must not be treated as production-validated decision support.
+13. Model cache is process-local; workers do not share invalidation state.
+14. Feedback does not trigger training and there is no API training endpoint despite a seeded `ml:train` permission.
+15. Segmentation cannot score customers without sufficient history.
+16. Forecasting has no outgoing cash or exogenous drivers and uses approximate intervals.
 19. Frontend API error normalization can hide detailed field/domain messages.
 20. Browser-level end-to-end testing is not implemented.
 
@@ -748,7 +747,7 @@ For accounting defects trace `Frontend → API route → service → repository/
 | 9. Invoice cannot be issued | Not DRAFT, no containing OPEN period, inactive accounts, duplicate issue; issue/post service | Inspect invoice/period/account state and API 409/422; expect one linked POSTED `INV-...` journal. Do not manually set status/journal FK. |
 | 10. Payment cannot be posted | Allocation mismatch/overpayment, wrong customer/status, closed period/account; payment service | Compare allocations to amount/balance, inspect transaction response; expect one `PAY-...` journal and atomic invoice update. Do not edit `amount_paid` directly. |
 | 11. Dashboard numbers are wrong | Wrong date window, ledger account classification, unposted journal, or receivable defect; reporting service | Reconcile trial balance/income/cash/receivables with posted rows. Do not add compensating fake transactions before finding the source. |
-| 12. Dashboard grows unexpectedly | New DRAFT invoices are included by current receivables query | Inspect `ReportingService.receivables_as_of`; refresh alone should write nothing. Preserve evidence; do not delete drafts merely to reduce the KPI. |
+| 12. Dashboard grows unexpectedly | Unexpected issued invoice/payment, date window, or report regression | Inspect `ReportingService.receivables_as_of`; drafts and refreshes should not affect totals. Reconcile source records; do not delete drafts merely to reduce the KPI. |
 | 13. Report does not reconcile | Draft vs posted confusion, date/type mapping, rounding or source row issue; reporting repositories/services/tests | Run report tests and query relevant POSTED lines; compare Decimal totals. Do not calculate authoritative replacements in React. |
 | 14. AI prediction fails | Missing permission/model/history, invalid input, execution error; ML route/service | Check HTTP status: 403 permission, 404 model, 422 data/artifact, 503 inference. Do not trigger training inside the request. |
 | 15. Model artifact cannot load | Unsafe identifier, missing files, metadata/schema/version/dependency mismatch; registry | Inspect artifact directory and sanitized backend error; run ML round-trip tests. Do not relax containment or load arbitrary pickle paths. |
@@ -775,7 +774,7 @@ flowchart TB
     PAY --> BAL[Invoice balance/status]
     F7[7 Reports] --> LEDGER
     F8[8 Dashboard] --> LEDGER
-    F8 --> REC[Receivables query incl. drafts]
+    F8 --> REC[Issued receivables query; drafts excluded]
     F9[9 Offline ML] --> ART[Versioned artifact] --> REG[Registry/activation]
     F10[10 Online ML] --> REG --> PRED[(Prediction + feedback)]
 ```
@@ -1097,7 +1096,7 @@ stateDiagram-v2
 
 ## ۹. رابط کاربری فارسی و تجربه فعلی
 
-ریشه سند `lang=fa` و `dir=rtl` است. پوسته در دسکتاپ sidebar و در عرض کوچک drawer، کارت موبایل و modal/bottom-sheet دارد. theme روشن/تاریک و نوع نمایش تاریخ در `localStorage` می‌ماند؛ تاریخ پیش‌فرض جلالی نمایش داده می‌شود ولی API همیشه تاریخ ISO میلادی می‌گیرد. نمودارها SVG/CSS کوچک خود پروژه‌اند.
+ریشه سند `lang=fa` و `dir=rtl` است. پوسته در دسکتاپ ناوبری گروه‌بندی‌شده بالای صفحه و در عرض کوچک drawer سمت راست، کارت موبایل و modal/bottom-sheet دارد. theme روشن/تاریک و نوع نمایش تاریخ در `localStorage` می‌ماند؛ تاریخ پیش‌فرض جلالی نمایش داده می‌شود ولی API همیشه تاریخ ISO میلادی می‌گیرد. نمودارها SVG/CSS کوچک خود پروژه‌اند.
 
 زبان UI با قالب API و بانک یکی نیست: label فارسی و چیدمان RTL است، رقم مبلغ عمداً انگلیسی نمایش داده می‌شود، تقویم فقط نمایش/تبدیل ورودی را عوض می‌کند، نام field/enum در JSON انگلیسی و تاریخ ISO میلادی است و PostgreSQL متن Unicode را بدون ترجمه ذخیره می‌کند.
 
@@ -1111,7 +1110,7 @@ router ساده بر History API ساخته شده و کتابخانه React Rou
 
 ## ۱۰. API فعلی به زبان کاربردی
 
-تمام مسیرها زیر `/api/v1` هستند. health، register و login عمومی‌اند؛ بقیه JWT و مجوز می‌خواهند.
+تمام مسیرها زیر `/api/v1` هستند. health، readiness، register و login عمومی‌اند؛ بقیه JWT و مجوز می‌خواهند.
 
 - هویت: `POST /auth/register`، `POST /auth/login`، `GET /auth/me` و `GET /users`.
 - اطلاعات پایه: CRUD محدود party/product/account و ساخت/list category؛ ساخت/list/close دوره.
@@ -1134,7 +1133,7 @@ router ساده بر History API ساخته شده و کتابخانه React Rou
 
 علت تغییر پورت، رزرو Windows برای محدوده شامل ۵۱۷۳/۵۱۷۴ و محدوده ۷۹۲۷ تا ۸۰۲۶ شامل ۸۰۰۰ بود. پورت داخلی FastAPI همچنان ۸۰۰۰ و Nginx همچنان ۸۰ است. آدرس مرورگر با localhost میزبان فرق دارد؛ backend برای بانک باید نام سرویس `db` را به کار ببرد.
 
-Compose ابتدا PostgreSQL را با `pg_isready` سالم می‌کند، بعد backend مهاجرت Alembic و bootstrap را اجرا کرده و Uvicorn را بالا می‌آورد؛ frontend منتظر health backend است. image backend وابستگی ML را نصب، model directory کنترل‌شده را copy/mount و با کاربر غیر root اجرا می‌کند. image frontend در Node 22 build و در Nginx سرو می‌شود. `.dockerignore`ها cache پایتون، venv، `.env`، Git، node_modules، dist و artifact تولیدی مدل را حذف می‌کنند، نه سورس و lockfile لازم را.
+Compose ابتدا PostgreSQL را با `pg_isready` سالم می‌کند، بعد backend مهاجرت Alembic و bootstrap را اجرا کرده و Uvicorn را بالا می‌آورد؛ frontend منتظر readiness وابسته به بانک است و healthcheck HTTP مستقل دارد. image backend وابستگی ML را نصب، model directory کنترل‌شده را به‌صورت read-only mount و با کاربر غیر root اجرا می‌کند. image frontend در Node 22 build و در Nginx سرو می‌شود. `.dockerignore`ها cache پایتون، venv، `.env`، Git، node_modules، dist و artifact تولیدی مدل را حذف می‌کنند، نه سورس و lockfile لازم را.
 
 Image قالب تغییرناپذیر build و container نمونه درحال اجراست. Compose هر سه container را در network خصوصی می‌گذارد تا نام DNS مانند `db` معتبر باشد. volume نام‌دار `postgres_data` پس از بازسازی container بانک باقی می‌ماند و bind mount مدل، artifact کنترل‌شده میزبان را در `/app/ml/models` قابل خواندن می‌کند. healthcheck فقط نمایشی نیست و ترتیب شروع dependencyها را کنترل می‌کند.
 
@@ -1158,13 +1157,13 @@ Image قالب تغییرناپذیر build و container نمونه درحال �
 
 ## ۱۴. محدودیت‌ها و ناسازگاری‌های مهم
 
-1. draft فاکتور در مطالبات و dashboard شمرده می‌شود.
-2. کاربر ثبت‌نامی Viewer است و بدون تخصیص نقش نمی‌تواند فاکتور بسازد.
-3. IRANSans در سورس نام‌گذاری شده ولی asset آن بسته‌بندی نشده است.
+1. کاربر ثبت‌نامی Viewer است و بدون تخصیص نقش نمی‌تواند فاکتور بسازد.
+2. IRANSans در سورس نام‌گذاری شده ولی asset آن بسته‌بندی نشده است.
+3. draft فاکتور از مطالبات و dashboard حذف می‌شود؛ تاریخچه «as-of» هنوز بر `issue_date` تکیه دارد و `issued_at` جدا ندارد.
 4. خرید/پرداخت تأمین‌کننده و subledger پرداختنی وجود ندارد.
 5. جریان نقد فقط دریافت ورودی است.
 6. مالیات فاکتور به حساب بدهی جداگانه نمی‌رود.
-7. نوع معنایی حساب‌های انتخابی هنگام issue/post enforce نمی‌شود.
+7. نوع کلی ASSET/REVENUE و تطابق حساب دریافتنی enforce می‌شود، اما نقش جزئی‌تر control account در مدل وجود ندارد.
 8. ویرایش/حذف/ابطال و credit note عملیات اصلی موجود نیست.
 9. چندشرکتی، ارز، انبار و مغایرت بانکی وجود ندارد.
 10. list/reportها pagination ندارند.
@@ -1251,7 +1250,7 @@ This handbook was cross-checked against the current repository rather than copie
 
 | Validation item | Result | Evidence |
 |---|---|---|
-| API coverage | **PASS** | All 56 decorators across health, auth, users, accounting, reporting and ML are represented by the API table/action flows |
+| API coverage | **PASS** | All 57 decorators across health/readiness, auth, users, accounting, reporting and ML are represented by the API table/action flows |
 | Database coverage | **PASS** | All 20 application tables plus Alembic bookkeeping, relationships, constraints and lifetime rules are described |
 | Accounting workflow coverage | **PASS** | Master data, numeric double-entry mapping, invariants, journals, invoices, receipts, reports and dashboard are covered |
 | ML coverage | **PASS** | All four pipelines, offline/online split, features/algorithms/evaluation/artifacts/registry/inference/security/limits are covered |
@@ -1265,15 +1264,14 @@ Configuration comparison includes backend settings, offline ML settings, Compose
 
 **Remaining documentation gaps:** there is no generated column-by-column data dictionary or checked-in OpenAPI snapshot, and Mermaid rendering depends on the Markdown viewer. The table descriptions and API inventory cover the current system, but a future schema/route change still requires a same-commit handbook update. Historical stage files intentionally retain old test counts, old boundary statements and recorded failures rather than being rewritten.
 
-**Contradictions found:** draft invoices are included in current receivables/dashboard; new registrations are Viewer-only; IRANSans is not bundled; and historical docs contain old ports/test counts/stage-boundary statements. Each is labeled rather than silently reconciled. No backend, frontend, schema, model, environment, or runtime behavior was modified while producing this document.
+**Current documented limitations:** new registrations are Viewer-only, IRANSans is not bundled, historical receivables have no separate issuance timestamp, and historical stage documents contain old ports/test counts/stage-boundary statements. Stage 9 fixed draft reporting, financial account validation, concurrent receipt allocation, historical category mutation, readiness, and related UI/API validation.
 
 Verification run on 2026-08-27 against the documented tree:
 
-- Backend/API tests: **57 passed**, 95% `backend.app` coverage.
-- Offline ML tests: **11 passed** (68 backend/ML tests in total).
+- Backend/API and offline ML tests: **76 passed**, 95% combined coverage.
 - Ruff: **PASS**.
 - Strict mypy: **PASS**, 91 source files, using `backend/pyproject.toml`.
-- Frontend: **18 tests passed**; standalone TypeScript check and production build **PASS**.
+- Frontend: **19 tests passed**; standalone TypeScript check and production build **PASS**.
 - Compose render: **PASS**; rendered mappings are backend `8100 -> 8000` and frontend `4173 -> 80`.
 - Non-failing warnings: upstream Starlette/httpx and joblib/NumPy deprecations remain; the known Windows ACL still prevents pytest from writing `backend/.pytest_cache`.
 

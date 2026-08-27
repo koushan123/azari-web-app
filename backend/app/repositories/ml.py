@@ -109,5 +109,9 @@ class MLRepository:
 
     def customer(self, customer_id: UUID) -> Party | None:
         return self.session.scalar(
-            select(Party).where(Party.id == customer_id, Party.is_customer.is_(True))
+            select(Party).where(
+                Party.id == customer_id,
+                Party.is_customer.is_(True),
+                Party.is_active.is_(True),
+            )
         )

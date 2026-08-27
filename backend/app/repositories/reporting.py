@@ -72,7 +72,10 @@ class ReportingRepository:
             select(Invoice, paid.label("paid_as_of"))
             .outerjoin(PaymentAllocation, PaymentAllocation.invoice_id == Invoice.id)
             .outerjoin(Payment, Payment.id == PaymentAllocation.payment_id)
-            .where(Invoice.issue_date <= as_of, Invoice.status != "CANCELLED")
+            .where(
+                Invoice.issue_date <= as_of,
+                Invoice.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
+            )
             .group_by(Invoice.id)
             .having(Invoice.total > paid)
             .order_by(Invoice.due_date, Invoice.invoice_number)

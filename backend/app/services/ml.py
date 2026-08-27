@@ -185,6 +185,10 @@ class MLService:
         invoice = self.repo.invoice(invoice_id)
         if invoice is None:
             raise ModelNotFoundError("Invoice not found")
+        if invoice.status not in {"ISSUED", "PARTIALLY_PAID"}:
+            raise PredictionInputError(
+                "Payment risk requires an issued invoice with an outstanding balance"
+            )
         if invoice.issue_date > as_of:
             raise PredictionInputError("Invoice did not exist at the requested as-of date")
         features = self._payment_features(

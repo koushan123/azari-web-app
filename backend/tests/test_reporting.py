@@ -191,6 +191,38 @@ def test_receivables_historical_as_of_filter_payables_cash_and_dashboard() -> No
         assert dashboard.overdue_invoice_count == 1
 
 
+def test_draft_invoice_does_not_affect_receivables_or_dashboard() -> None:
+    with SessionLocal() as session:
+        values = report_domain(session)
+        service = AccountingService(session, values.actor)
+        service.create_invoice(
+            InvoiceCreate(
+                invoice_number="REPORT-DRAFT",
+                customer_id=values.party.id,
+                issue_date=date(2026, 2, 10),
+                due_date=date(2026, 2, 15),
+                items=[
+                    {
+                        "description": "Unissued work",
+                        "quantity": Decimal("1"),
+                        "unit_price": Decimal("999"),
+                    }
+                ],
+            )
+        )
+        reports = ReportingService(session)
+
+        receivables = reports.receivables(date(2026, 2, 28))
+        dashboard = reports.dashboard(
+            as_of=date(2026, 2, 28),
+            start_date=date(2026, 2, 1),
+            end_date=date(2026, 2, 28),
+        )
+
+        assert receivables.total_outstanding == Decimal("200.00")
+        assert dashboard.outstanding_invoices == Decimal("200.00")
+
+
 def test_party_history_filters_and_invalid_ranges() -> None:
     with SessionLocal() as session:
         values = report_domain(session)

@@ -22,8 +22,12 @@ from backend.app.db.models import (
     Role,
     User,
 )
-from backend.app.ml.registry import ArtifactRegistry, ArtifactValidationError
-from backend.app.schemas.ml import FeedbackRequest
+from backend.app.ml.registry import (
+    ArtifactRegistry,
+    ArtifactValidationError,
+    PredictionInputError,
+)
+from backend.app.schemas.ml import FeedbackRequest, TransactionClassifyRequest
 from backend.app.services.ml import MLService
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -340,6 +344,22 @@ def test_invalid_feedback_and_no_active_model_are_safe(client: TestClient) -> No
         json={"feedback_type": "CORRECTION"},
     )
     assert response.status_code == 422
+
+
+def test_ml_rejects_blank_classification_and_draft_payment_risk() -> None:
+    with pytest.raises(ValueError):
+        TransactionClassifyRequest(description="   ")
+
+    party, invoice = accounting_history()
+    with SessionLocal() as session:
+        actor = session.merge(add_user("ADMIN", "draft-risk@example.com"))
+        current = session.get(Invoice, invoice.id)
+        assert current is not None
+        current.status = "DRAFT"
+        session.commit()
+        service = MLService(session, get_settings())
+        with pytest.raises(PredictionInputError, match="issued invoice"):
+            service.payment_risk(current.id, date(2026, 2, 10), actor)
 
 
 def test_all_pipeline_api_response_shapes_and_feedback_permission(client: TestClient) -> None:

@@ -87,6 +87,25 @@ class AccountingService:
             raise NotFoundError(f"{model.__name__} not found")
         return item
 
+    def _get_for_update(self, model: type[ModelT], item_id: UUID) -> ModelT:
+        item = self.session.scalar(
+            select(model)
+            .where(model.id == item_id)  # type: ignore[attr-defined]
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if item is None:
+            raise NotFoundError(f"{model.__name__} not found")
+        return item
+
+    def _posting_account(self, account_id: UUID, expected_type: str, label: str) -> Account:
+        account = self._get(Account, account_id)
+        if not account.is_active:
+            raise ConflictError(f"Inactive {label.casefold()} account cannot receive postings")
+        if account.category.account_type != expected_type:
+            raise AccountingError(f"{label} account must have type {expected_type}")
+        return account
+
     def _audit(self, action: str, resource: Base) -> None:
         self.audit.record(
             action=action,
@@ -152,6 +171,25 @@ class AccountingService:
     def update_account(self, account_id: UUID, data: AccountUpdate) -> Account:
         account = self._get(Account, account_id)
         values = data.model_dump(exclude_unset=True)
+        if "category_id" in values:
+            category_id = values["category_id"]
+            if category_id is None:
+                raise AccountingError("Account category is required")
+            self._get(AccountCategory, category_id)
+            if category_id != account.category_id:
+                posted_line = self.session.scalar(
+                    select(JournalLine.id)
+                    .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
+                    .where(
+                        JournalLine.account_id == account.id,
+                        JournalEntry.status == "POSTED",
+                    )
+                    .limit(1)
+                )
+                if posted_line is not None:
+                    raise ConflictError(
+                        "The category of an account used in posted journals cannot be changed"
+                    )
         parent_id = values.get("parent_id")
         if parent_id == account.id:
             raise AccountingError("An account cannot be its own parent")
@@ -353,6 +391,10 @@ class AccountingService:
         invoice = self._get(Invoice, invoice_id)
         if invoice.status != "DRAFT":
             raise ConflictError("Only draft invoices can be issued")
+        if data.receivable_account_id == data.revenue_account_id:
+            raise AccountingError("Receivable and revenue accounts must be different")
+        self._posting_account(data.receivable_account_id, "ASSET", "Receivable")
+        self._posting_account(data.revenue_account_id, "REVENUE", "Revenue")
         period = self._period_for(invoice.issue_date)
         journal = self.create_journal(
             JournalCreate(
@@ -420,9 +462,47 @@ class AccountingService:
         return payment
 
     def post_payment(self, payment_id: UUID, data: PaymentPost) -> Payment:
-        payment = self._get(Payment, payment_id)
+        payment = self._get_for_update(Payment, payment_id)
         if payment.status != "DRAFT":
             raise ConflictError("Only draft payments can be posted")
+        if data.cash_account_id == data.receivable_account_id:
+            raise AccountingError("Cash and receivable accounts must be different")
+        self._posting_account(data.cash_account_id, "ASSET", "Cash")
+        self._posting_account(data.receivable_account_id, "ASSET", "Receivable")
+
+        invoice_ids = sorted(
+            (allocation.invoice_id for allocation in payment.allocations), key=str
+        )
+        locked_invoices = list(
+            self.session.scalars(
+                select(Invoice)
+                .where(Invoice.id.in_(invoice_ids))
+                .order_by(Invoice.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        invoices = {invoice.id: invoice for invoice in locked_invoices}
+        if len(invoices) != len(invoice_ids):
+            raise NotFoundError("Invoice not found")
+        for allocation in payment.allocations:
+            invoice = invoices[allocation.invoice_id]
+            if invoice.customer_id != payment.party_id or invoice.status not in {
+                "ISSUED",
+                "PARTIALLY_PAID",
+            }:
+                raise ConflictError("Payment allocation targets an invalid invoice")
+            if allocation.amount > invoice.balance_due:
+                raise AccountingError("Allocation exceeds current invoice balance")
+            receivable_accounts = {
+                line.account_id
+                for line in invoice.journal.lines
+                if line.debit > 0
+            } if invoice.journal is not None else set()
+            if receivable_accounts != {data.receivable_account_id}:
+                raise AccountingError(
+                    "Payment receivable account must match the invoice receivable account"
+                )
         period = self._period_for(payment.payment_date)
         journal = self.create_journal(
             JournalCreate(
@@ -444,9 +524,7 @@ class AccountingService:
         try:
             self._post_journal(journal)
             for allocation in payment.allocations:
-                invoice = allocation.invoice
-                if allocation.amount > invoice.balance_due:
-                    raise AccountingError("Allocation exceeds current invoice balance")
+                invoice = invoices[allocation.invoice_id]
                 invoice.amount_paid = money(invoice.amount_paid + allocation.amount)
                 invoice.status = "PAID" if invoice.balance_due == 0 else "PARTIALLY_PAID"
             payment.status = "POSTED"

@@ -1,12 +1,47 @@
 # Stage 9 Debug Audit
 
-Audit date: 2026-08-27  
-Audit phase: Phase A — investigation only  
-Overall status: **FAIL**
+Audit date: 2026-08-27
 
-The automated suites and the ordinary happy path pass, but the application is not yet safe to treat as a production accounting system. Disposable-database testing proved five HIGH financial-integrity defects: draft invoices enter receivables/dashboard figures, invoice and payment posting accept semantically invalid or identical accounts, concurrent payments can over-allocate an invoice, and changing the category of a used account retroactively rewrites financial statements. No application fixes are included in this audit because several remedies change business semantics and require owner approval under the Stage 9 instructions.
+Original audit phase: Phase A — investigation only
+
+Original Phase A status: **FAIL**
+
+Remediation date: 2026-08-27
+
+Current status: **PASS WITH ISSUES**
+
+The Phase A investigation proved five HIGH financial-integrity defects: draft invoices entered receivables/dashboard figures, invoice and payment posting accepted semantically invalid or identical accounts, concurrent payments could over-allocate an invoice, and changing the category of a used account retroactively rewrote financial statements. The detailed issue sections below preserve that original evidence. The remediation record immediately below is authoritative for current behavior.
 
 No CRITICAL issue or exposed tracked secret was found. Authentication/RBAC enforcement, normal double-entry posting, ordinary partial/final receipt flows, rollback on tested failures, migration round-tripping, the normal report reconciliation, the four ML pipelines' basic boundaries, and the three-container runtime all passed.
+
+## Stage 9 remediation update
+
+The owner authorized correction of confirmed technical defects while requiring tax behavior to follow only the written specification. `APP_BEHAVIOR_SPECIFICATION.md:202-205` explicitly requires an invoice with subtotal 100 and tax 10 to increase both receivables and revenue by 110. The implementation therefore continues crediting the full invoice total to the selected revenue account; no tax-liability account or tax engine was introduced.
+
+### Resolved findings
+
+- **A-01 resolved:** receivables/dashboard now include only issued accounting states and exclude DRAFT/CANCELLED invoices.
+- **A-02 resolved:** invoice issue requires distinct active ASSET receivable and REVENUE accounts; the frontend filters the choices by those categories.
+- **A-03 resolved:** receipt posting requires distinct active ASSET accounts and requires its receivable account to match every allocated invoice's posted debit account.
+- **A-04 resolved:** payment and allocated invoice rows are locked with `SELECT ... FOR UPDATE` in deterministic order and revalidated under lock. PostgreSQL replay produced one POSTED and one REJECTED payment, with exactly 100.00 posted allocations against a 100.00 invoice.
+- **A-05 resolved:** an account used in any posted journal can no longer change category; historical statement classification cannot be rewritten through that API.
+- **V-01/V-02 resolved:** party names are trimmed/nonblank and party emails use validated email syntax.
+- **ML-02/ML-03 resolved:** blank classification input is rejected and payment-risk inference requires an issued/partially paid invoice.
+- **ML-04 resolved:** segmentation requires an active customer.
+- **I-01/I-02 resolved:** `/health` remains process liveness, `/ready` queries PostgreSQL, Compose depends on readiness, and nginx has its own working HTTP healthcheck.
+- **I-05 mitigated:** the model bind mount is read-only. Joblib artifacts must still come from a trusted build/release source.
+- **S-02 resolved:** the HTTP UI no longer makes an unconditional secure-transport claim.
+- **UI-01 resolved:** issue/post forms filter broad account categories, validate distinct receipt accounts, and expose busy states on invoice creation/issue and receipt posting.
+- **DOC-01/DOC-02 resolved:** current README/handbook describe top desktop navigation, row locking, readiness, and corrected draft reporting.
+
+### Deliberately unresolved owner decisions
+
+- **A-06:** the specification permits non-negative prices/tax but also requires posted journals to have a positive total. It does not say whether zero-total invoices must be rejected at draft creation or completed without a journal. Accounting behavior was not guessed.
+- **UI-02:** the repository cannot legally self-host IRANSans without a licensed WOFF2 asset supplied by the owner. Fallback typography remains.
+- Historical `as_of` receivables still use `issue_date`; the specification does not define a separate issuance-timestamp policy.
+- Tax treatment remains exactly the explicitly tested specification behavior described above.
+
+Because the HIGH financial failures are resolved but owner-dependent and production-hardening items remain, the current result is **PASS WITH ISSUES**, not unrestricted production approval.
 
 ## Severity definitions
 
@@ -293,7 +328,7 @@ backend container pip check        PASS
 sampled current container logs     no ERROR/Traceback/Exception or sensitive-value matches
 ```
 
-The PostgreSQL named volume remained mounted across container recreation. The model directory is a writable bind mount.
+The PostgreSQL named volume remained mounted across container recreation. During Phase A the model directory was a writable bind mount; remediation changed it to read-only.
 
 ### Findings
 
@@ -524,16 +559,19 @@ L-01 through L-08: narrow draft mutation surface, no repository backup automatio
 
 ## Changes made
 
-- Added this audit document only.
-- No backend, frontend, database schema/migration, ML artifact/model, Compose, environment, or business behavior was changed.
-- A temporary audit script and the exact disposable database `azari_stage9_audit` were removed after use.
+- Fixed draft receivable/dashboard filtering, posting-account validation, invoice-receivable matching, concurrent payment locking, and historical category mutation.
+- Tightened party and ML validation and active-customer/invoice eligibility.
+- Added database-backed readiness, frontend HTTP health, and a read-only ML model bind mount.
+- Filtered financial posting choices by account category, added targeted Persian guidance, busy states, and truthful login transport wording.
+- Added backend/frontend regression coverage and updated current documentation. No database schema or migration changed.
+- Temporary verification scripts and the exact disposable databases `azari_stage9_audit` and `azari_stage9_concurrency` were removed after use.
 
 ## Verification
 
 ```text
 Backend + ML tests
   .venv/Scripts/python.exe -m pytest backend/tests ml/tests --cov=backend.app --cov=ml --cov-report=term
-  PASS — 68 passed; 96% combined coverage; 5,231 warnings
+  PASS — 76 passed; 95% combined coverage; 5,231 warnings
 
 Ruff
   .venv/Scripts/python.exe -m ruff check backend ml scripts
@@ -545,7 +583,7 @@ Strict mypy
 
 Frontend tests
   frontend/test.cmd
-  PASS — 18 tests
+  PASS — 19 tests
 
 TypeScript
   npm run typecheck
@@ -570,18 +608,20 @@ Disposable black-box/integration probe
   normal invoice/payment/report flow      PASS
   duplicate/invalid/closed/rollback flow  PASS
   ML basic boundaries                     PASS WITH ISSUES
-  adversarial accounting/concurrency      FAIL — A-01 through A-05 reproduced
+  original adversarial accounting probe   FAIL — A-01 through A-05 reproduced
+  remediation regression suite            PASS
+  PostgreSQL concurrent-payment replay     PASS — POSTED, REJECTED; 100.00 allocated
 
 Docker
   docker compose config --quiet           PASS
   docker compose up -d --build             PASS
   PostgreSQL                               healthy
-  backend health                           HTTP 200 on host 8100
-  frontend                                 HTTP 200 on host 4173
+  backend liveness/readiness                HTTP 200 on host 8100
+  frontend                                 HTTP 200 and healthy on host 4173
   restart check                            PASS
-  DB-unavailable readiness check           FAIL — health incorrectly stayed 200
+  DB-unavailable readiness check           PASS — liveness 200, readiness 500
 ```
 
 ## Remaining risks and disposition
 
-Stage 9 remains **FAIL** until the HIGH accounting defects are resolved and covered by regression tests. The immediate next action is not Stage 10: it is owner confirmation of the five business-semantic questions above, followed by Phase B/C fixes in the prescribed severity order.
+Stage 9 is currently **PASS WITH ISSUES**. The confirmed HIGH accounting defects are resolved and covered by regression tests, including a PostgreSQL concurrency replay. Stage 10 has not started. Owner input is still required for zero-total invoice behavior, any future historical issuance-timestamp policy, and provision of a licensed IRANSans asset; tax remains unchanged because the existing total-to-revenue behavior is explicitly specified.

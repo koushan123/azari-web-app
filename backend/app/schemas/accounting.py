@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ORMModel(BaseModel):
@@ -10,8 +10,10 @@ class ORMModel(BaseModel):
 
 
 class PartyCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=320)
+    email: EmailStr | None = Field(default=None, max_length=320)
     phone: str | None = Field(default=None, max_length=50)
     address: str | None = None
     is_customer: bool = False
@@ -19,8 +21,10 @@ class PartyCreate(BaseModel):
 
 
 class PartyUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    email: str | None = Field(default=None, max_length=320)
+    email: EmailStr | None = Field(default=None, max_length=320)
     phone: str | None = Field(default=None, max_length=50)
     address: str | None = None
     is_customer: bool | None = None

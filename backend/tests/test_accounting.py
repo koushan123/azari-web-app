@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from backend.app.db.database import SessionLocal
+from backend.app.db.database import SessionLocal, engine
 from backend.app.db.models import (
     Account,
     AccountCategory,
@@ -38,7 +38,8 @@ from backend.app.services.accounting import (
     NotFoundError,
 )
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 
@@ -220,6 +221,11 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
         assert issued.status == "ISSUED"
         assert issued.journal is not None
         assert sum(line.debit for line in issued.journal.lines) == issued.total
+        assert next(
+            line.credit
+            for line in issued.journal.lines
+            if line.account_id == values.revenue.id
+        ) == Decimal("275.00")
         with pytest.raises(ConflictError, match="Source-document"):
             service.reverse_journal(issued.journal.id)
         failed = service.create_invoice(invoice_data(values, "I-2"))
@@ -237,6 +243,32 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
         persisted = session.get(Invoice, failed.id)
         assert persisted is not None and persisted.status == "DRAFT"
         assert len(session.scalars(select(JournalEntry)).all()) == before
+
+
+def test_invoice_issue_requires_distinct_asset_receivable_and_revenue_accounts() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        invoice = service.create_invoice(invoice_data(values))
+
+        with pytest.raises(AccountingError, match="different"):
+            service.issue_invoice(
+                invoice.id,
+                InvoiceIssue(
+                    receivable_account_id=values.receivable.id,
+                    revenue_account_id=values.receivable.id,
+                ),
+            )
+        with pytest.raises(AccountingError, match="REVENUE"):
+            service.issue_invoice(
+                invoice.id,
+                InvoiceIssue(
+                    receivable_account_id=values.receivable.id,
+                    revenue_account_id=values.cash.id,
+                ),
+            )
+
+        session.refresh(invoice)
+        assert invoice.status == "DRAFT" and invoice.journal_id is None
 
 
 def post_invoice(service: AccountingService, values: Domain, number: str = "I-1") -> Invoice:
@@ -286,6 +318,74 @@ def test_partial_and_full_payments_post_through_same_ledger() -> None:
         )
         with pytest.raises(ConflictError, match="Source-document"):
             service.reverse_journal(second.journal.id)
+
+
+def test_payment_post_requires_distinct_accounts_and_matching_invoice_receivable() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        invoice = post_invoice(service, values)
+        payment = service.create_payment(
+            payment_data(values, invoice, Decimal("100"), "ACCOUNT-CHECK")
+        )
+
+        with pytest.raises(AccountingError, match="different"):
+            service.post_payment(
+                payment.id,
+                PaymentPost(
+                    cash_account_id=values.receivable.id,
+                    receivable_account_id=values.receivable.id,
+                ),
+            )
+        other_receivable = Account(
+            code="1199",
+            name="Other receivable",
+            category=values.receivable.category,
+        )
+        session.add(other_receivable)
+        session.commit()
+        with pytest.raises(AccountingError, match="match the invoice"):
+            service.post_payment(
+                payment.id,
+                PaymentPost(
+                    cash_account_id=values.cash.id,
+                    receivable_account_id=other_receivable.id,
+                ),
+            )
+
+        session.refresh(payment)
+        session.refresh(invoice)
+        assert payment.status == "DRAFT" and payment.journal_id is None
+        assert invoice.amount_paid == 0 and invoice.status == "ISSUED"
+
+
+def test_payment_post_locks_payment_and_invoice_rows_before_allocation() -> None:
+    locked_selects = 0
+
+    def count_locks(*args: object) -> None:
+        nonlocal locked_selects
+        clause = args[1]
+        if getattr(clause, "_for_update_arg", None) is not None:
+            locked_selects += 1
+
+    event.listen(engine, "before_execute", count_locks)
+    try:
+        with SessionLocal() as session:
+            service, values = domain(session)
+            invoice = post_invoice(service, values)
+            payment = service.create_payment(
+                payment_data(values, invoice, Decimal("100"), "LOCK-CHECK")
+            )
+            service.post_payment(
+                payment.id,
+                PaymentPost(
+                    cash_account_id=values.cash.id,
+                    receivable_account_id=values.receivable.id,
+                ),
+            )
+    finally:
+        event.remove(engine, "before_execute", count_locks)
+
+    assert locked_selects >= 2
 
 
 def test_payment_overallocation_invalid_sum_and_cancelled_invoice_fail() -> None:
@@ -392,6 +492,24 @@ def test_master_data_period_and_hierarchy_rules() -> None:
             service.get(Product, values.admin.id)
 
 
+def test_posted_account_category_cannot_rewrite_historical_reports() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        post_invoice(service, values)
+        expense = service.create_category(
+            CategoryCreate(name="Reclassification target", account_type="EXPENSE")
+        )
+
+        with pytest.raises(ConflictError, match="posted journals"):
+            service.update_account(
+                values.receivable.id,
+                AccountUpdate(category_id=expense.id),
+            )
+
+        session.refresh(values.receivable)
+        assert values.receivable.category_id != expense.id
+
+
 def test_invalid_invoice_and_payment_parties_and_products() -> None:
     with SessionLocal() as session:
         service, values = domain(session)
@@ -410,3 +528,10 @@ def test_invalid_invoice_and_payment_parties_and_products() -> None:
         invalid_dates.due_date = date(2026, 1, 1)
         with pytest.raises(AccountingError, match="due date"):
             service.create_invoice(invalid_dates)
+
+
+def test_party_contract_rejects_blank_names_and_invalid_email() -> None:
+    with pytest.raises(ValidationError):
+        PartyCreate(name="   ", is_customer=True)
+    with pytest.raises(ValidationError):
+        PartyCreate(name="Customer", email="not-an-email", is_customer=True)
