@@ -28,6 +28,10 @@ workflows, restart persistence, and a non-root backend image.
    `http://localhost:8100/docs`.
 
 Local backend and frontend setup is documented in [docs/SETUP.md](docs/SETUP.md).
+For a source-verified explanation of the complete current system in English and
+Persian, read [HOW_THE_PROJECT_WORKS.md](HOW_THE_PROJECT_WORKS.md). The stage
+documents below are historical delivery records rather than the current-state
+reference.
 
 ## Stage 2 identity API
 
@@ -51,16 +55,17 @@ balanced journal posting engine. See [STAGE_3_IMPLEMENTATION.md](STAGE_3_IMPLEME
 
 Stage 4 adds read-only financial statements, revenue/expense summaries,
 historical receivables, liability-account payable exposure, customer history,
-cash receipts, and operational dashboard aggregates. Every value is derived
-from persisted posted accounting records and protected by `reports:read`.
+cash receipts, and operational dashboard aggregates protected by
+`reports:read`. The current receivables query also includes draft invoices; see
+the handbook's known-limitations section.
 
 ## Stage 5 offline ML
 
 Stage 5 adds four framework-independent pipelines under `ml/`: calibrated
 TF-IDF transaction classification, timestamp-safe Random Forest payment risk,
 deterministic harmonic cash-flow forecasting, and scaled K-Means customer
-segmentation. They use explicitly synthetic development data and are not wired
-to HTTP or the database yet.
+segmentation. They use explicitly synthetic development data. At Stage 5 they
+were not yet wired to HTTP or the database; Stage 6 added that integration.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\generate_ml_data.py --seed 42
@@ -85,8 +90,8 @@ are ADMIN-only through `ml:manage`. See
 The React application is now a Persian business interface rather than a
 technical health shell. It uses the existing JWT and RBAC contracts, sends all
 accounting and report data through the versioned API, and never substitutes
-sample values for absent records. Desktop navigation is top-based; tablet and
-mobile navigation uses a right-side drawer. Light is the default theme and the
+sample values for absent records. Desktop navigation uses a sidebar; narrower
+tablet and mobile layouts use a right-side drawer. Light is the default theme and the
 dark theme and calendar choice persist locally.
 
 Frontend developer and test commands are in [frontend/README.md](frontend/README.md).
