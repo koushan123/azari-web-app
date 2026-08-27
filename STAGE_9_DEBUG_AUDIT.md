@@ -16,7 +16,7 @@ No CRITICAL issue or exposed tracked secret was found. Authentication/RBAC enfor
 
 ## Stage 9 remediation update
 
-The owner authorized correction of confirmed technical defects while requiring tax behavior to follow only the written specification. `APP_BEHAVIOR_SPECIFICATION.md:202-205` explicitly requires an invoice with subtotal 100 and tax 10 to increase both receivables and revenue by 110. The implementation therefore continues crediting the full invoice total to the selected revenue account; no tax-liability account or tax engine was introduced.
+The owner authorized correction of confirmed technical defects while requiring tax behavior to follow only the written specification. `APP_BEHAVIOR_SPECIFICATION.md:204-211` requires an active `TAX_LIABILITY`-role account for a taxed invoice and specifies that an invoice with subtotal 100 and tax 10 increases receivables by 110, revenue by 100, and tax liability by 10. The implementation matches that specification: invoice issuance requires `tax_liability_account_id` when tax is nonzero, credits only `invoice.subtotal` to revenue, and credits `invoice.tax` separately to the tax-liability account. This posting split does not add jurisdiction-specific tax calculation, filing, or settlement behavior.
 
 ### Resolved findings
 
@@ -25,6 +25,7 @@ The owner authorized correction of confirmed technical defects while requiring t
 - **A-03 resolved:** receipt posting requires distinct active ASSET accounts and requires its receivable account to match every allocated invoice's posted debit account.
 - **A-04 resolved:** payment and allocated invoice rows are locked with `SELECT ... FOR UPDATE` in deterministic order and revalidated under lock. PostgreSQL replay produced one POSTED and one REJECTED payment, with exactly 100.00 posted allocations against a 100.00 invoice.
 - **A-05 resolved:** an account used in any posted journal can no longer change category; historical statement classification cannot be rewritten through that API.
+- **A-06/A-07 resolved:** zero-total invoices are rejected, and taxed invoice issue credits revenue for subtotal and a required `TAX_LIABILITY`-role account for tax.
 - **V-01/V-02 resolved:** party names are trimmed/nonblank and party emails use validated email syntax.
 - **ML-02/ML-03 resolved:** blank classification input is rejected and payment-risk inference requires an issued/partially paid invoice.
 - **ML-04 resolved:** segmentation requires an active customer.
@@ -36,10 +37,9 @@ The owner authorized correction of confirmed technical defects while requiring t
 
 ### Deliberately unresolved owner decisions
 
-- **A-06:** the specification permits non-negative prices/tax but also requires posted journals to have a positive total. It does not say whether zero-total invoices must be rejected at draft creation or completed without a journal. Accounting behavior was not guessed.
 - **UI-02:** the repository cannot legally self-host IRANSans without a licensed WOFF2 asset supplied by the owner. Fallback typography remains.
 - Historical `as_of` receivables still use `issue_date`; the specification does not define a separate issuance-timestamp policy.
-- Tax treatment remains exactly the explicitly tested specification behavior described above.
+- Tax treatment follows the explicit split described above; jurisdiction-specific tax rules remain outside scope.
 
 Because the HIGH financial failures are resolved but owner-dependent and production-hardening items remain, the current result is **PASS WITH ISSUES**, not unrestricted production approval.
 
@@ -201,8 +201,8 @@ After issue, a 40.00 receipt produced PARTIALLY_PAID with 70.00 due; a 70.00 rec
 
 ### Other accounting findings
 
-- **MEDIUM A-06:** A zero-price product and zero-total invoice draft are accepted, but issue returns 422 because the generated journal lines are zero. This creates a dead-end draft. Decide whether zero invoices are prohibited or require a non-ledger completion workflow.
-- **MEDIUM A-07:** Invoice tax is credited to the selected revenue account along with subtotal. No tax-liability split exists. This is safe only if intentional for the current simplified model.
+- **RESOLVED A-06:** Zero-total invoice creation is rejected before persistence.
+- **RESOLVED A-07:** A taxed invoice requires a `TAX_LIABILITY`-role account; revenue is credited for subtotal and tax is credited separately to that liability account.
 - **MEDIUM A-08:** Issue does not revalidate customer/product activity after a draft was created. A later-deactivated master record can remain in a subsequent workflow.
 - **LOW A-09:** The generic UI label “payments” covers only incoming customer receipts and can confuse users expecting supplier/outgoing payments.
 - **EXPECTED LIMITATION L-03:** Supplier bills, supplier payments, tax engine, inventory accounting, bank reconciliation, payroll, multi-company, and foreign currency are not implemented.
@@ -375,7 +375,7 @@ The PostgreSQL named volume remained mounted across container recreation. During
 
 - **MEDIUM V-01:** Party email accepts invalid syntax.
 - **MEDIUM V-02:** Whitespace-only party/master-data names are accepted.
-- **MEDIUM A-06:** Zero-value invoice drafts are accepted but cannot issue.
+- **RESOLVED A-06:** Zero-value invoice drafts are rejected before persistence.
 - **MEDIUM ML-02:** Whitespace classification input is accepted.
 - **MEDIUM V-03:** Account issue/post schemas validate UUID shape only, not business posting role or distinctness.
 - **LOW V-04:** Update schemas can produce database-level generic conflicts for invalid foreign keys instead of validating referenced resources first.
@@ -437,7 +437,7 @@ The application is suitable for controlled development/demo use, not production 
 | A-03 | HIGH | Same/wrong account payment post can settle subledger without reducing GL receivables. |
 | A-04 | HIGH | Concurrent full payments both post and over-allocate one invoice. |
 | A-05 | HIGH | Category update of used account rewrites historical statements. |
-| A-06 | MEDIUM | Zero invoice draft is accepted but cannot be issued. |
+| A-06 | RESOLVED | Zero invoice creation is rejected before persistence. |
 | V-01 | MEDIUM | Invalid party email accepted. |
 | V-02 | MEDIUM | Whitespace-only party/master names accepted. |
 | ML-02 | MEDIUM | Whitespace-only classification accepted. |
@@ -499,7 +499,7 @@ No fixes are applied in this Phase A document. Recommended order:
 2. **Owner decision:** define invoice/payment control-account rules; minimally enforce distinct accounts and category/role compatibility in backend and filtered UI (A-02/A-03/UI-01).
 3. Lock invoice rows in deterministic order during payment posting, recheck allocations under lock, and add a real concurrent-post regression (A-04).
 4. Forbid category changes once an account participates in a posted journal, unless an effective-dated reclassification design is explicitly chosen (A-05).
-5. Decide zero-invoice/tax behavior; align create/issue validation and ledger mapping (A-06/A-07).
+5. **Implemented in Phase B:** reject zero invoices and split tax from revenue into a required tax-liability posting (A-06/A-07).
 6. Normalize/trim human text, use `EmailStr` for party emails if email is intended to be syntactic, and reject blank ML input (V-01/V-02/ML-02).
 7. Require an issued/partially-paid invoice for payment-risk inference and active customers for segmentation (ML-03/ML-04).
 8. Separate `/health` liveness from database-backed readiness; add a frontend healthcheck (I-01/I-02).
@@ -514,7 +514,7 @@ No fixes are applied in this Phase A document. Recommended order:
 1. Should receivables/dashboard include exactly `ISSUED`, `PARTIALLY_PAID`, and non-settled `PAID` history, and should historical `as_of` exclude invoices not yet issued at that moment? Supporting the latter reliably may require an issuance timestamp or audit-derived policy.
 2. What defines a valid AR, revenue, and cash/bank posting account: broad account category, a configured control-account designation, or fixed organization settings? Category-only validation is better than current behavior but still allows the wrong asset account.
 3. Should a used account's category be permanently immutable, or should category movement require a dated accounting reclassification workflow?
-4. Are zero-total invoices prohibited, and should invoice tax credit a distinct tax-liability account rather than revenue?
+4. **Decided in Phase B:** zero-total invoices are prohibited, and invoice tax credits a distinct `TAX_LIABILITY`-role account rather than revenue.
 5. Should reversal into a closed historical period remain forbidden, or should reversal post into the current open period with a reference to the source?
 
 ## 21. Items that should NOT be changed
@@ -543,7 +543,7 @@ A-01 through A-05 and ML-01 (production artifact supply-chain risk).
 
 ### Medium issues
 
-A-06 through A-08, C-01, D-01, E-02 through E-05, I-01 through I-05, ML-02 through ML-06, R-01/R-02, S-02 through S-06, UI-02 through UI-07, and V-01 through V-03.
+A-08, C-01, D-01, E-02 through E-05, I-01 through I-05, ML-02 through ML-06, R-01/R-02, S-02 through S-06, UI-02 through UI-07, and V-01 through V-03. A-06 and A-07 were resolved in Phase B.
 
 ### Low issues
 
@@ -624,7 +624,7 @@ Docker
 
 ## Remaining risks and disposition
 
-Stage 9 is currently **PASS WITH ISSUES**. The confirmed HIGH accounting defects are resolved and covered by regression tests, including a PostgreSQL concurrency replay. Stage 10 has not started. Owner input is still required for zero-total invoice behavior, any future historical issuance-timestamp policy, and provision of a licensed IRANSans asset; tax remains unchanged because the existing total-to-revenue behavior is explicitly specified.
+Stage 9 was **PASS WITH ISSUES** at this pre-Phase-B checkpoint. The confirmed HIGH accounting defects were resolved and covered by regression tests, including a PostgreSQL concurrency replay. Stage 10 had not started. At this checkpoint, zero-total and tax decisions were still pending; Phase B below records the later decisions and implementation: zero-total invoices are rejected, revenue receives subtotal only, and tax posts separately to a required `TAX_LIABILITY`-role account.
 
 ## Phase B implementation — 2026-08-27
 
