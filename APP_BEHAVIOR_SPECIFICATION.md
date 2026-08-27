@@ -95,6 +95,7 @@ The browser must not silently block the form.
   and non-negative tax. A product link is optional.
 - The frontend shows a clearly labeled preview. The backend recalculates and
   stores the authoritative subtotal, tax, and total.
+- An invoice whose authoritative total is zero is rejected.
 - Clicking save once creates exactly one draft invoice. The submit button is
   disabled while the request is running to prevent accidental duplicates.
 - On success, the modal closes, the invoice list refreshes, and a Persian success
@@ -111,11 +112,14 @@ The browser must not silently block the form.
 
 #### Issue an invoice
 
-- Issuing requires the proper permission, an open period, and valid active
-  receivable and revenue accounts.
+- Issuing requires the proper permission, an open period, and active accounts
+  explicitly assigned the `RECEIVABLE` and `REVENUE` posting roles. A taxed
+  invoice also requires an active `TAX_LIABILITY` account; broad account
+  category alone is not sufficient.
 - The user sees a confirmation explaining that issue creates accounting entries.
-- One successful issue creates one balanced posted journal, debits receivables,
-  credits revenue, changes the invoice to `ISSUED`, and updates reports once.
+- One successful issue creates one balanced posted journal, debits receivables
+  for the total, credits revenue for the subtotal, credits tax liability for
+  tax (when nonzero), changes the invoice to `ISSUED`, and updates reports once.
 - Repeated clicks, refreshes, retries, or issuing an already issued invoice must
   not duplicate the journal or increase dashboard values again.
 - A source-generated journal cannot be independently reversed while leaving the
@@ -197,12 +201,14 @@ The browser must not silently block the form.
 
 #### Invoice creation
 
-1. Create an active customer, active accounts, and an open period.
+1. Create an active customer, an open period, and active accounts with
+   `RECEIVABLE`, `REVENUE`, and `TAX_LIABILITY` posting roles.
 2. Sign in with an account that has invoice write/issue permissions.
 3. Create invoice `TEST-001` with one line for 100 and tax 10.
 4. Exactly one draft with total 110 must appear.
 5. The posted dashboard and reports must remain unchanged while it is a draft.
-6. Issue it once; revenue and receivables must each increase by exactly 110.
+6. Issue it once; receivables increase by 110, revenue by 100, and tax
+   liability by 10.
 7. Refresh the browser repeatedly; the totals must remain unchanged.
 8. A second issue attempt must be rejected without any new journal or total.
 
@@ -312,6 +318,7 @@ The browser must not silently block the form.
   اختیاری است.
 - رابط کاربری پیش‌نمایش مشخص نشان می‌دهد؛ مبلغ جزء، مالیات و جمع قطعی را سرور
   دوباره محاسبه و ذخیره می‌کند.
+- فاکتوری که جمع قطعی آن صفر باشد رد می‌شود.
 - یک بار فشردن ذخیره باید دقیقاً یک پیش‌نویس ایجاد کند. هنگام ارسال، دکمه برای
   جلوگیری از رکورد تکراری غیرفعال می‌شود.
 - پس از موفقیت، پنجره بسته، فهرست تازه و پیام فارسی شامل شماره فاکتور نمایش داده
@@ -327,6 +334,12 @@ The browser must not silently block the form.
 - پیش‌نویس پیش از صدور باید قابل بازبینی و در صورت پشتیبانی قابل ویرایش باشد.
 
 #### صدور فاکتور
+
+- صدور فقط با حساب‌های فعال دارای نقش صریح دریافتنی (`RECEIVABLE`) و درآمد
+  (`REVENUE`) مجاز است؛ نوع کلی حساب به‌تنهایی کافی نیست. فاکتور دارای مالیات
+  به حساب فعال بدهی مالیات (`TAX_LIABILITY`) نیز نیاز دارد.
+- سند صدور، کل مبلغ را بدهکار دریافتنی، مبلغ جزء را بستانکار درآمد و مالیات
+  غیرصفر را بستانکار بدهی مالیات می‌کند.
 
 - صدور به مجوز مناسب، دوره باز و حساب‌های فعال دریافتنی و درآمد نیاز دارد.
 - کاربر باید تأییدی ببیند که توضیح می‌دهد صدور، سند حسابداری ایجاد می‌کند.
@@ -408,12 +421,14 @@ The browser must not silently block the form.
 
 #### ساخت فاکتور
 
-۱. یک مشتری فعال، حساب‌های فعال و دوره مالی باز ایجاد کنید.
+۱. یک مشتری فعال، دوره مالی باز و حساب‌های فعال با نقش دریافتنی، درآمد و بدهی
+مالیات ایجاد کنید.
 ۲. با کاربری دارای مجوز ساخت و صدور فاکتور وارد شوید.
 ۳. فاکتور `TEST-001` با یک قلم ۱۰۰ و مالیات ۱۰ بسازید.
 ۴. باید دقیقاً یک پیش‌نویس با جمع ۱۱۰ دیده شود.
 ۵. تا زمانی که پیش‌نویس است، داشبورد ثبت‌شده و گزارش‌ها نباید تغییر کنند.
-۶. یک بار آن را صادر کنید؛ درآمد و مطالبات باید دقیقاً ۱۱۰ افزایش یابند.
+۶. یک بار آن را صادر کنید؛ مطالبات باید ۱۱۰، درآمد ۱۰۰ و بدهی مالیات ۱۰ افزایش
+یابد.
 ۷. مرورگر را چند بار تازه کنید؛ اعداد باید ثابت بمانند.
 ۸. صدور دوباره باید بدون سند یا مبلغ جدید رد شود.
 

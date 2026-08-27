@@ -31,6 +31,7 @@ from backend.app.schemas.accounting import (
     InvoiceCreate,
     InvoiceIssue,
     JournalCreate,
+    JournalLineCreate,
     PartyCreate,
     PartyUpdate,
     PaymentCreate,
@@ -98,13 +99,31 @@ class AccountingService:
             raise NotFoundError(f"{model.__name__} not found")
         return item
 
-    def _posting_account(self, account_id: UUID, expected_type: str, label: str) -> Account:
+    def _posting_account(
+        self, account_id: UUID, expected_type: str, expected_role: str, label: str
+    ) -> Account:
         account = self._get(Account, account_id)
         if not account.is_active:
             raise ConflictError(f"Inactive {label.casefold()} account cannot receive postings")
         if account.category.account_type != expected_type:
             raise AccountingError(f"{label} account must have type {expected_type}")
+        if account.posting_role != expected_role:
+            raise AccountingError(f"{label} account must have posting role {expected_role}")
         return account
+
+    @staticmethod
+    def _validate_posting_role(category: AccountCategory, posting_role: str) -> None:
+        required_types = {
+            "CASH": "ASSET",
+            "RECEIVABLE": "ASSET",
+            "REVENUE": "REVENUE",
+            "TAX_LIABILITY": "LIABILITY",
+        }
+        required_type = required_types.get(posting_role)
+        if required_type is not None and category.account_type != required_type:
+            raise AccountingError(
+                f"Posting role {posting_role} requires account type {required_type}"
+            )
 
     def _audit(self, action: str, resource: Base) -> None:
         self.audit.record(
@@ -158,7 +177,8 @@ class AccountingService:
         return category
 
     def create_account(self, data: AccountCreate) -> Account:
-        self._get(AccountCategory, data.category_id)
+        category = self._get(AccountCategory, data.category_id)
+        self._validate_posting_role(category, data.posting_role)
         if data.parent_id is not None:
             self._get(Account, data.parent_id)
         account = Account(**data.model_dump())
@@ -171,11 +191,12 @@ class AccountingService:
     def update_account(self, account_id: UUID, data: AccountUpdate) -> Account:
         account = self._get(Account, account_id)
         values = data.model_dump(exclude_unset=True)
+        category = account.category
         if "category_id" in values:
             category_id = values["category_id"]
             if category_id is None:
                 raise AccountingError("Account category is required")
-            self._get(AccountCategory, category_id)
+            category = self._get(AccountCategory, category_id)
             if category_id != account.category_id:
                 posted_line = self.session.scalar(
                     select(JournalLine.id)
@@ -190,6 +211,24 @@ class AccountingService:
                     raise ConflictError(
                         "The category of an account used in posted journals cannot be changed"
                     )
+        posting_role = values.get("posting_role", account.posting_role)
+        if posting_role is None:
+            raise AccountingError("Account posting role is required")
+        self._validate_posting_role(category, posting_role)
+        if posting_role != account.posting_role:
+            posted_line = self.session.scalar(
+                select(JournalLine.id)
+                .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
+                .where(
+                    JournalLine.account_id == account.id,
+                    JournalEntry.status == "POSTED",
+                )
+                .limit(1)
+            )
+            if posted_line is not None:
+                raise ConflictError(
+                    "The posting role of an account used in posted journals cannot be changed"
+                )
         parent_id = values.get("parent_id")
         if parent_id == account.id:
             raise AccountingError("An account cannot be its own parent")
@@ -331,10 +370,14 @@ class AccountingService:
             ],
         )
         self.session.add(reversal)
-        self._flush()
-        self._post_journal(reversal)
-        self._audit("accounting.journal.reversed", reversal)
-        self._commit()
+        try:
+            self._flush()
+            self._post_journal(reversal)
+            self._audit("accounting.journal.reversed", reversal)
+            self._commit()
+        except Exception:
+            self.session.rollback()
+            raise
         return reversal
 
     def create_invoice(self, data: InvoiceCreate) -> Invoice:
@@ -381,6 +424,8 @@ class AccountingService:
             total=money(subtotal + tax_total),
             items=items,
         )
+        if invoice.total == 0:
+            raise AccountingError("Invoice total must be greater than zero")
         self.session.add(invoice)
         self._flush()
         self._audit("accounting.invoice.created", invoice)
@@ -391,21 +436,51 @@ class AccountingService:
         invoice = self._get(Invoice, invoice_id)
         if invoice.status != "DRAFT":
             raise ConflictError("Only draft invoices can be issued")
-        if data.receivable_account_id == data.revenue_account_id:
-            raise AccountingError("Receivable and revenue accounts must be different")
-        self._posting_account(data.receivable_account_id, "ASSET", "Receivable")
-        self._posting_account(data.revenue_account_id, "REVENUE", "Revenue")
+        if invoice.tax > 0 and data.tax_liability_account_id is None:
+            raise AccountingError("A tax liability account is required for a taxed invoice")
+        account_ids = {data.receivable_account_id, data.revenue_account_id}
+        if data.tax_liability_account_id is not None:
+            account_ids.add(data.tax_liability_account_id)
+        required_count = 3 if invoice.tax > 0 else 2
+        if len(account_ids) != required_count:
+            raise AccountingError("Invoice posting accounts must be different")
+        self._posting_account(
+            data.receivable_account_id, "ASSET", "RECEIVABLE", "Receivable"
+        )
+        self._posting_account(data.revenue_account_id, "REVENUE", "REVENUE", "Revenue")
+        if data.tax_liability_account_id is not None:
+            self._posting_account(
+                data.tax_liability_account_id,
+                "LIABILITY",
+                "TAX_LIABILITY",
+                "Tax liability",
+            )
         period = self._period_for(invoice.issue_date)
+        journal_lines = [
+            JournalLineCreate(
+                account_id=data.receivable_account_id, debit=invoice.total, credit=0
+            ),
+            JournalLineCreate(
+                account_id=data.revenue_account_id, debit=0, credit=invoice.subtotal
+            ),
+        ]
+        if invoice.tax > 0:
+            if data.tax_liability_account_id is None:  # guarded above; narrows the type
+                raise AccountingError("A tax liability account is required for a taxed invoice")
+            journal_lines.append(
+                JournalLineCreate(
+                    account_id=data.tax_liability_account_id,
+                    debit=0,
+                    credit=invoice.tax,
+                )
+            )
         journal = self.create_journal(
             JournalCreate(
                 entry_number=f"INV-{invoice.invoice_number}",
                 entry_date=invoice.issue_date,
                 description=f"Invoice {invoice.invoice_number}",
                 period_id=period.id,
-                lines=[
-                    {"account_id": data.receivable_account_id, "debit": invoice.total, "credit": 0},
-                    {"account_id": data.revenue_account_id, "debit": 0, "credit": invoice.total},
-                ],
+                lines=journal_lines,
             ),
             commit=False,
         )
@@ -467,8 +542,10 @@ class AccountingService:
             raise ConflictError("Only draft payments can be posted")
         if data.cash_account_id == data.receivable_account_id:
             raise AccountingError("Cash and receivable accounts must be different")
-        self._posting_account(data.cash_account_id, "ASSET", "Cash")
-        self._posting_account(data.receivable_account_id, "ASSET", "Receivable")
+        self._posting_account(data.cash_account_id, "ASSET", "CASH", "Cash")
+        self._posting_account(
+            data.receivable_account_id, "ASSET", "RECEIVABLE", "Receivable"
+        )
 
         invoice_ids = sorted(
             (allocation.invoice_id for allocation in payment.allocations), key=str

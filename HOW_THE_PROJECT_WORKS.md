@@ -301,7 +301,7 @@ erDiagram
     ML_PREDICTION ||--o{ ML_PREDICTION_FEEDBACK : receives
 ```
 
-Migration order is identity (`20260817_0001`), core accounting (`cd6670d77e70`), accounting/report indexes (`20260818_0002`), then ML integration (`20260825_0003`, current head). Startup runs `alembic upgrade head` before role/bootstrap initialization and Uvicorn.
+Migration order is identity (`20260817_0001`), core accounting (`cd6670d77e70`), accounting/report indexes (`20260818_0002`), ML integration (`20260825_0003`), then Stage 9 Phase B hardening (`20260827_0004`, current head). Startup runs `alembic upgrade head` before role/bootstrap initialization and Uvicorn.
 
 ## 7. Accounting behavior and invariants
 
@@ -309,11 +309,12 @@ All authoritative monetary calculations use `Decimal` and round half-up to two c
 
 ### 7.1 Numeric example mapped to storage
 
-Suppose invoice `INV-100` totals 1,100 (including any tax represented in that total). Issuing creates one `journal_entries` row and two `journal_lines` rows:
+Suppose invoice `INV-100` has a 1,000 subtotal and 100 tax, for a 1,100 total. Issuing creates one `journal_entries` row and three `journal_lines` rows:
 
 ```text
 Debit   Accounts Receivable   1,100   -> journal_lines.account_id = selected receivable
-Credit  Revenue               1,100   -> journal_lines.account_id = selected revenue
+Credit  Revenue               1,000   -> journal_lines.account_id = selected revenue
+Credit  Tax Liability           100   -> journal_lines.account_id = selected tax liability
 ```
 
 The `invoices.journal_entry_id` points to that posted entry, `invoices.total=1100`, and status becomes `ISSUED`. A later customer receipt of 500 creates a `payments` row, a `payment_allocations` row for 500, and another posted entry:
@@ -337,12 +338,17 @@ The payment links to its journal, the allocation links payment and invoice, `inv
 | A posted journal has at least two lines | Journal post service | A nominally balanced accounting event needs opposing sides |
 | Invoice totals are server-calculated | Invoice service with `Decimal` rounding | A manipulated/stale browser could overstate or understate receivables/revenue |
 | Issue happens only once from DRAFT | Invoice status check plus unique journal link | Retries could duplicate revenue and receivables |
+| Draft invoices have no financial effect | Posted-status report filters and invoice service tests | Operational drafts could inflate receivables, revenue, cash flow, or dashboard totals |
+| Zero-total invoices are rejected | Invoice creation service | A non-economic document could enter the posting workflow |
+| Source posting accounts have explicit roles | Account role schema/service and filtered UI | Any asset or revenue-category account could be misused as a control account |
+| Tax is credited to liability, not revenue | Invoice issue service and tax regression | Revenue would be overstated and tax obligations hidden |
 | Payment allocations exactly equal payment | Payment create service | Cash and settled invoice balances would disagree |
 | Allocation matches the customer and eligible invoice | Payment service | One customer's money could settle another customer's or invalid document |
 | Allocation never exceeds current balance | Create and post recheck | An invoice could have negative outstanding or concurrency could overpay it |
 | Payment posts only once | Status, unique reference/journal, transaction | Cash and receivable postings could be duplicated |
 | Periods do not overlap | Financial-period service | A transaction date could belong to ambiguous reporting periods |
 | Account hierarchy is acyclic | Account update service and self-parent DB check | Recursive navigation/reporting could loop indefinitely |
+| Posted account category/role is immutable | Account update service | Historical reports or control-account meaning could be rewritten |
 | A party is customer and/or supplier | Schema/service and DB check | A master record would have no supported accounting role |
 | Issue/payment multi-row writes are atomic | SQLAlchemy transaction and rollback tests | Half a journal, stale status, or unmatched allocation could remain |
 | One reversal per eligible journal | Reversal status/source/unique link checks | Repeated reversals would alternately duplicate financial effects |
@@ -356,6 +362,9 @@ Some invariants are enforced redundantly in schema, service and database because
 - A party must remain a customer, a supplier, or both. Invoice/payment operations additionally require an active customer.
 - Products and accounts can be deactivated. An invoice product must be active at invoice creation; every account must be active when a journal is posted.
 - Account parent changes are rejected if they create self-reference or a deeper hierarchy cycle.
+- Accounts have one posting role: `GENERAL`, `CASH`, `RECEIVABLE`, `REVENUE`, or
+  `TAX_LIABILITY`. Role/category compatibility is checked, and category or role
+  cannot change after the account appears in a posted journal.
 - Financial periods may not overlap. Closing changes the period to `CLOSED`; posted financial writes require an `OPEN` period.
 
 ### 7.4 Journal lifecycle
@@ -368,7 +377,7 @@ stateDiagram-v2
     DRAFT --> CANCELLED: model supports status; no current API transition
 ```
 
-A draft line must put a positive amount on exactly one of debit or credit. Draft creation permits a single line and does not require an open period or active account; posting is the authoritative checkpoint and requires at least two lines, an open period, active accounts, and equal debit/credit totals after cent rounding. A reversal is a new posted journal with swapped sides and an `REV-` number. Only one reversal is allowed, and invoice/payment-generated entries cannot be reversed through the generic endpoint. There are no journal edit or delete routes.
+A draft line must put a positive amount on exactly one of debit or credit. Draft creation permits a single line and does not require an open period or active account; posting is the authoritative checkpoint and requires at least two lines, an open period, active accounts, and equal debit/credit totals after cent rounding. A reversal is a new posted journal with swapped sides and an `REV-` number. It uses the original period in the current API and is rejected atomically when that period is closed; the original posted journal remains unchanged. Only one reversal is allowed, and invoice/payment-generated entries cannot be reversed through the generic endpoint. There are no journal edit or delete routes.
 
 ### 7.5 Invoice lifecycle
 
@@ -382,9 +391,9 @@ stateDiagram-v2
     DRAFT --> CANCELLED: status exists; no current API transition
 ```
 
-Invoice creation requires an active customer and at least one item. A product item defaults to its catalog price when no price is supplied; a free-form item requires a price. The backend calculates subtotal, tax, total, and each line total. Issuing finds the period containing the issue date, creates and posts `INV-{invoice_number}`, debits the selected receivable account for the total and credits the selected revenue account for the total, then links the journal and marks the invoice issued in one transaction.
+Invoice creation requires an active customer, at least one item, and a positive authoritative total. A product item defaults to its catalog price when no price is supplied; a free-form item requires a price. The backend calculates subtotal, tax, total, and each line total. A draft has no ledger, receivable, revenue, cash-flow, report, or dashboard financial effect. Issuing finds the period containing the issue date, requires active accounts with the exact semantic posting roles, creates and posts `INV-{invoice_number}`, debits receivables for the total, credits revenue for the subtotal, and credits a tax-liability account for nonzero tax. It links the journal and marks the invoice issued in one transaction.
 
-**Current accounting limitations:** the issue endpoint verifies account activity through journal posting but does not verify that the selected accounts are semantically ASSET/REVENUE. Tax is credited together with revenue; there is no separate tax-liability posting. There is no invoice edit, cancel, credit-note, or delete endpoint.
+**Current accounting limitations:** this is a posting split, not a jurisdiction-specific tax engine; tax rates, filing, settlement, recoverability, and tax returns remain outside scope. There is no invoice edit, cancel, credit-note, or delete endpoint.
 
 ### 7.6 Payment lifecycle
 
@@ -715,7 +724,7 @@ Stage files are historical evidence. Statements such as “the next stage has no
 2. IRANSans is named but not bundled, so typography depends on host fonts/fallbacks.
 3. Supplier bills and supplier payments are absent; payables are liability-ledger exposure only.
 4. Cash flow is posted customer-receipt inflow only; outflows are always zero.
-5. The specification defines invoice tax as part of the amount credited to revenue; there is no separate tax-liability engine.
+5. Invoice tax posts separately to a `TAX_LIABILITY` account; jurisdiction-specific tax calculation, filing, and settlement remain unsupported.
 6. Account categories enforce ASSET receivable/cash and REVENUE invoice destinations, but there is no finer control-account designation inside ASSET.
 7. No invoice/journal/payment editing, deletion, cancellation workflow, or credit notes are exposed.
 8. No multi-company/tenant isolation, currencies, exchange rates, warehouses, or inventory movements.
@@ -1031,17 +1040,17 @@ flowchart TB
 
 ### فاکتور فروش
 
-ایجاد فاکتور، مشتری فعال و حداقل یک ردیف می‌خواهد. برای کالای انتخابی، قیمت کاتالوگ مقدار پیش‌فرض است؛ ردیف آزاد باید قیمت داشته باشد. subtotal، مالیات، total و جمع ردیف را backend محاسبه می‌کند. فاکتور DRAFT هنوز دفتر کل را تغییر نمی‌دهد.
+ایجاد فاکتور، مشتری فعال، حداقل یک ردیف و جمع قطعی بیشتر از صفر می‌خواهد. برای کالای انتخابی، قیمت کاتالوگ مقدار پیش‌فرض است؛ ردیف آزاد باید قیمت داشته باشد. subtotal، مالیات، total و جمع ردیف را backend محاسبه می‌کند. فاکتور DRAFT هیچ اثر مالی بر دفتر کل، مطالبات، درآمد، جریان نقدی، گزارش‌ها یا جمع‌های داشبورد ندارد.
 
-در صدور، سرویس دوره شامل تاریخ فاکتور را پیدا می‌کند و سند `INV-{number}` می‌سازد: کل مبلغ به حساب دریافتنی بدهکار و به حساب درآمد بستانکار می‌شود؛ سپس سند و فاکتور در همان تراکنش POSTED/ISSUED می‌شوند.
+در صدور، سرویس دوره شامل تاریخ فاکتور را پیدا می‌کند و فقط حساب‌های فعال با نقش صریح `RECEIVABLE`، `REVENUE` و در صورت وجود مالیات `TAX_LIABILITY` را می‌پذیرد. سند `INV-{number}` کل مبلغ را به دریافتنی بدهکار، مبلغ جزء را به درآمد بستانکار و مالیات را به بدهی مالیات بستانکار می‌کند؛ سپس سند و فاکتور در همان تراکنش POSTED/ISSUED می‌شوند.
 
-محدودیت فعلی: نوع حساب انتخابی به‌طور معنایی ASSET/REVENUE کنترل نمی‌شود و مالیات نیز همراه درآمد بستانکار می‌شود، نه در حساب بدهی مالیات. ویرایش، ابطال، حذف و credit note فاکتور پیاده نشده است.
+محدودیت فعلی: این تفکیک ثبت، موتور کامل مالیات حوزه قضایی نیست؛ نرخ‌گذاری، اظهارنامه و تسویه مالیات خارج از محدوده‌اند. ویرایش، ابطال، حذف و credit note فاکتور پیاده نشده است.
 
 ### دریافت مشتری
 
 موجودیت `payment` فعلی در عمل دریافت از مشتری است. مجموع تخصیص‌ها باید دقیقاً برابر مبلغ مثبت دریافت باشد؛ فاکتور تکراری، مشتری متفاوت، وضعیت نامعتبر و تخصیص بیش از مانده رد می‌شود. هنگام ثبت، مانده‌ها دوباره داخل تراکنش بررسی می‌شوند، سند `PAY-{reference}` حساب نقد را بدهکار و دریافتنی را بستانکار می‌کند و `amount_paid` و وضعیت فاکتور به PARTIALLY_PAID یا PAID می‌رسد. وضعیت، قیود یکتا و rollback از ثبت تکراری جلوگیری می‌کنند.
 
-پرداخت به تأمین‌کننده، دریافت بدون تخصیص، ابطال پرداخت و کنترل نوع حساب cash/receivable وجود ندارد.
+پرداخت به تأمین‌کننده، دریافت بدون تخصیص و ابطال پرداخت وجود ندارد. ثبت دریافت فقط حساب‌های دارای نقش صریح `CASH` و `RECEIVABLE` را می‌پذیرد.
 
 ```mermaid
 stateDiagram-v2
@@ -1162,7 +1171,7 @@ Image قالب تغییرناپذیر build و container نمونه درحال �
 3. draft فاکتور از مطالبات و dashboard حذف می‌شود؛ تاریخچه «as-of» هنوز بر `issue_date` تکیه دارد و `issued_at` جدا ندارد.
 4. خرید/پرداخت تأمین‌کننده و subledger پرداختنی وجود ندارد.
 5. جریان نقد فقط دریافت ورودی است.
-6. مالیات فاکتور به حساب بدهی جداگانه نمی‌رود.
+6. مالیات فاکتور به حساب دارای نقش `TAX_LIABILITY` می‌رود، اما محاسبه، اظهارنامه و تسویه مالیاتی حوزه قضایی پیاده نشده است.
 7. نوع کلی ASSET/REVENUE و تطابق حساب دریافتنی enforce می‌شود، اما نقش جزئی‌تر control account در مدل وجود ندارد.
 8. ویرایش/حذف/ابطال و credit note عملیات اصلی موجود نیست.
 9. چندشرکتی، ارز، انبار و مغایرت بانکی وجود ندارد.
@@ -1264,7 +1273,7 @@ Configuration comparison includes backend settings, offline ML settings, Compose
 
 **Remaining documentation gaps:** there is no generated column-by-column data dictionary or checked-in OpenAPI snapshot, and Mermaid rendering depends on the Markdown viewer. The table descriptions and API inventory cover the current system, but a future schema/route change still requires a same-commit handbook update. Historical stage files intentionally retain old test counts, old boundary statements and recorded failures rather than being rewritten.
 
-**Current documented limitations:** new registrations are Viewer-only, IRANSans is not bundled, historical receivables have no separate issuance timestamp, and historical stage documents contain old ports/test counts/stage-boundary statements. Stage 9 fixed draft reporting, financial account validation, concurrent receipt allocation, historical category mutation, readiness, and related UI/API validation.
+**Current documented limitations:** new registrations are Viewer-only, IRANSans is not bundled, historical receivables have no separate issuance timestamp, and historical stage documents contain old ports/test counts/stage-boundary statements. Stage 9 fixed draft reporting, semantic financial account roles, concurrent receipt allocation, historical category/role mutation, zero invoices, tax-liability posting, closed-period reversal rollback, model-artifact integrity, readiness, and related UI/API validation.
 
 Verification run on 2026-08-27 against the documented tree:
 

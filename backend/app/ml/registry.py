@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -10,10 +11,11 @@ from threading import RLock
 from typing import Any
 from uuid import UUID
 
-from ml.common import ARTIFACT_SCHEMA_VERSION, ArtifactMetadata
+from ml.common import ARTIFACT_SCHEMA_VERSION, ArtifactMetadata, inspect_artifact
+from ml.preprocessing.payment_features import PAYMENT_FEATURES
 from ml.training.cash_flow import load_cash_flow_model
 from ml.training.payment_risk import load_payment_risk_model
-from ml.training.segmentation import load_segmentation_model
+from ml.training.segmentation import SEGMENT_FEATURES, load_segmentation_model
 from ml.training.transaction import load_transaction_model
 
 from backend.app.db.models import MLModelVersion
@@ -24,11 +26,17 @@ PIPELINES = {
     "cash_flow_forecast",
     "customer_segmentation",
 }
-LOADERS: dict[str, Callable[[Path], Any]] = {
+LOADERS: dict[str, Callable[[Path, str | None], Any]] = {
     "transaction_classification": load_transaction_model,
     "payment_delay_risk": load_payment_risk_model,
     "cash_flow_forecast": load_cash_flow_model,
     "customer_segmentation": load_segmentation_model,
+}
+EXPECTED_FEATURES = {
+    "transaction_classification": ["description"],
+    "payment_delay_risk": PAYMENT_FEATURES,
+    "cash_flow_forecast": ["date", "net_cash_flow"],
+    "customer_segmentation": SEGMENT_FEATURES,
 }
 ARTIFACT_IDENTIFIER = re.compile(r"^[a-z0-9-]+/[A-Za-z0-9._-]+$")
 
@@ -62,8 +70,9 @@ class FeedbackConflictError(MLIntegrationError):
 
 
 class ArtifactRegistry:
-    def __init__(self, model_dir: Path) -> None:
+    def __init__(self, model_dir: Path, *, require_read_only: bool = False) -> None:
         self.model_dir = model_dir.resolve()
+        self.require_read_only = require_read_only
 
     def resolve(self, identifier: str) -> Path:
         if not ARTIFACT_IDENTIFIER.fullmatch(identifier):
@@ -73,15 +82,19 @@ class ArtifactRegistry:
             raise ArtifactValidationError("Invalid artifact identifier")
         return candidate
 
-    def validate(self, pipeline: str, identifier: str) -> tuple[Any, ArtifactMetadata]:
+    def validate(self, pipeline: str, identifier: str) -> tuple[ArtifactMetadata, str]:
+        """Inspect metadata and compute integrity without deserializing joblib."""
         if pipeline not in PIPELINES:
             raise ArtifactValidationError("Unsupported ML pipeline")
         path = self.resolve(identifier)
         if not path.is_dir():
             raise ArtifactValidationError("Registered artifact is unavailable")
         try:
-            model = LOADERS[pipeline](path)
-            metadata: ArtifactMetadata = model.metadata
+            metadata, digest = inspect_artifact(
+                path,
+                pipeline=pipeline,
+                expected_features=EXPECTED_FEATURES[pipeline],
+            )
         except Exception as exc:
             raise ArtifactValidationError("Artifact validation failed") from exc
         if metadata.schema_version != ARTIFACT_SCHEMA_VERSION:
@@ -95,7 +108,27 @@ class ArtifactRegistry:
                 raise ArtifactValidationError("Artifact runtime dependency is unavailable") from exc
             if runtime_version.split(".", 1)[0] != trained_version.split(".", 1)[0]:
                 raise ArtifactValidationError("Artifact runtime dependency is incompatible")
-        return model, metadata
+        return metadata, digest
+
+    def load(self, pipeline: str, identifier: str, expected_digest: str | None) -> Any:
+        if expected_digest is None:
+            raise ArtifactValidationError("Artifact integrity has not been approved")
+        metadata, digest = self.validate(pipeline, identifier)
+        if digest != expected_digest:
+            raise ArtifactValidationError("Artifact integrity validation failed")
+        path = self.resolve(identifier)
+        if self.require_read_only and any(
+            os.access(candidate, os.W_OK)
+            for candidate in (path, path / "metadata.json", path / "model.joblib")
+        ):
+            raise ArtifactValidationError("Production artifacts must be read-only")
+        try:
+            model = LOADERS[pipeline](path, expected_digest)
+        except Exception as exc:
+            raise ArtifactValidationError("Artifact validation failed") from exc
+        if model.metadata != metadata:
+            raise ArtifactValidationError("Artifact metadata changed during loading")
+        return model
 
 
 class ModelCache:
@@ -107,7 +140,10 @@ class ModelCache:
         with self._lock:
             if record.id in self._models:
                 return self._models[record.id]
-            model, metadata = registry.validate(record.pipeline, record.artifact_identifier)
+            model = registry.load(
+                record.pipeline, record.artifact_identifier, record.artifact_digest
+            )
+            metadata: ArtifactMetadata = model.metadata
             if metadata.model_version != record.model_version:
                 raise ArtifactValidationError("Registered model metadata is incompatible")
             if metadata.dataset_fingerprint != record.dataset_fingerprint:

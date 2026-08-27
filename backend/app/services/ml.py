@@ -45,18 +45,22 @@ class MLService:
         self.settings = settings
         self.repo = MLRepository(session)
         self.audit = AuditRepository(session)
-        self.artifacts = ArtifactRegistry(settings.ML_MODEL_DIR)
+        self.artifacts = ArtifactRegistry(
+            settings.ML_MODEL_DIR,
+            require_read_only=settings.APP_ENV.casefold() == "production",
+        )
 
     def register_model(
         self, pipeline: str, artifact_identifier: str, actor: User
     ) -> MLModelVersion:
-        _, metadata = self.artifacts.validate(pipeline, artifact_identifier)
+        metadata, digest = self.artifacts.validate(pipeline, artifact_identifier)
         if self.repo.model_by_version(pipeline, metadata.model_version) is not None:
             raise FeedbackConflictError("This model version is already registered")
         record = MLModelVersion(
             pipeline=pipeline,
             model_version=metadata.model_version,
             artifact_identifier=artifact_identifier,
+            artifact_digest=digest,
             artifact_schema_version=metadata.schema_version,
             dataset_fingerprint=metadata.dataset_fingerprint,
             feature_schema=metadata.feature_schema,
@@ -88,7 +92,17 @@ class MLService:
         target = self.repo.model_by_id(model_id)
         if target is None:
             raise ModelNotFoundError("Model version not found")
-        self.artifacts.validate(target.pipeline, target.artifact_identifier)
+        metadata, digest = self.artifacts.validate(
+            target.pipeline, target.artifact_identifier
+        )
+        if metadata.model_version != target.model_version:
+            raise PredictionExecutionError("Registered model metadata is incompatible")
+        if metadata.dataset_fingerprint != target.dataset_fingerprint:
+            raise PredictionExecutionError("Registered artifact fingerprint is incompatible")
+        if target.artifact_digest is not None and target.artifact_digest != digest:
+            raise PredictionExecutionError("Registered artifact integrity validation failed")
+        target.artifact_digest = digest
+        self.artifacts.load(target.pipeline, target.artifact_identifier, digest)
         records = self.repo.models(target.pipeline)
         self.session.execute(
             update(MLModelVersion)

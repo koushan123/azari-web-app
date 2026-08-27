@@ -331,3 +331,19 @@ low-confidence review, restart persistence, and audit/log safety passed. The
 npm advisory endpoint was unavailable due to an external connection reset;
 synthetic-model fitness and documented product gaps remain limitations. See
 `STAGE_8_IMPLEMENTATION.md`. Stage 9 has not started.
+
+## Stage 9 — Audit and Phase B HIGH remediation
+
+Stage 9 Phase B is **PASS** for the owner-approved HIGH-remediation scope.
+Draft invoices have no financial effect; invoice/payment source accounts use
+explicit semantic posting roles; posted account category/role is immutable;
+zero invoices are rejected; tax posts separately to liability; closed-period
+reversal attempts roll back; concurrent payments cannot over-allocate; and
+production ML artifacts require a pinned digest and read-only runtime access.
+
+Migration `20260827_0004` is at PostgreSQL head with no Alembic drift. The final
+verification passes 83 backend/ML tests at 95% combined coverage, 19 frontend
+tests, TypeScript, production build, project-scoped Ruff, strict mypy, a real
+PostgreSQL tax/concurrency probe, a clean Compose rebuild, three healthy
+services, backend liveness/readiness HTTP 200, and frontend HTTP 200. See
+`STAGE_9_DEBUG_AUDIT.md`. Stage 10 has not started.

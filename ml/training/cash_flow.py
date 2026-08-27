@@ -150,9 +150,12 @@ def save_cash_flow_model(model: CashFlowModel, path: Path) -> None:
     save_artifact(path, state, model.metadata)
 
 
-def load_cash_flow_model(path: Path) -> CashFlowModel:
+def load_cash_flow_model(path: Path, expected_digest: str | None = None) -> CashFlowModel:
     state, metadata = load_artifact(
-        path, pipeline="cash_flow_forecast", expected_features=["date", "net_cash_flow"]
+        path,
+        pipeline="cash_flow_forecast",
+        expected_features=["date", "net_cash_flow"],
+        expected_digest=expected_digest,
     )
     return CashFlowModel(
         state["estimator"],

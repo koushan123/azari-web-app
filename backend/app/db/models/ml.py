@@ -52,6 +52,7 @@ class MLModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     pipeline: Mapped[str] = mapped_column(String(50), nullable=False)
     model_version: Mapped[str] = mapped_column(String(100), nullable=False)
     artifact_identifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    artifact_digest: Mapped[str | None] = mapped_column(String(64))
     artifact_schema_version: Mapped[str] = mapped_column(String(30), nullable=False)
     dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     feature_schema: Mapped[list[str]] = mapped_column(JSON_VALUE, nullable=False)

@@ -625,3 +625,76 @@ Docker
 ## Remaining risks and disposition
 
 Stage 9 is currently **PASS WITH ISSUES**. The confirmed HIGH accounting defects are resolved and covered by regression tests, including a PostgreSQL concurrency replay. Stage 10 has not started. Owner input is still required for zero-total invoice behavior, any future historical issuance-timestamp policy, and provision of a licensed IRANSans asset; tax remains unchanged because the existing total-to-revenue behavior is explicitly specified.
+
+## Phase B implementation — 2026-08-27
+
+This section records the later owner decisions and implementation results. The
+Phase A findings above remain as historical evidence and are not rewritten.
+
+### Resolved HIGH accounting and security defects
+
+- Draft invoices remain operational records only and are excluded from ledger,
+  receivable, revenue, cash-flow, report, and dashboard financial totals.
+- Accounts now have explicit `GENERAL`, `CASH`, `RECEIVABLE`, `REVENUE`, and
+  `TAX_LIABILITY` posting roles. Invoice/payment posting requires the exact
+  semantic role; broad account category is insufficient.
+- Account category and posting role are immutable after posted journal use.
+- Zero-total invoices are rejected before persistence.
+- Taxed invoice issue debits receivables for total, credits revenue for subtotal,
+  and credits tax to an explicit tax-liability account. No jurisdiction-specific
+  tax calculation, filing, or settlement semantics were invented.
+- Generic reversal remains a new immutable journal and is rejected atomically if
+  its period is closed. The current endpoint does not invent a new reversal date
+  or period.
+- Payment and invoice rows are locked and allocations are revalidated under the
+  transaction. A real PostgreSQL two-payment race produced exactly one `POSTED`
+  and one `REJECTED` result.
+- Model registration now inspects inert metadata and pins a SHA-256 digest without
+  deserializing joblib. Activation/loading rejects missing or changed digests;
+  production additionally rejects artifacts writable by the backend process.
+  Artifact paths are not returned in errors or API responses.
+
+### Migration
+
+Additive migration `20260827_0004` adds `accounts.posting_role` and
+`ml_model_versions.artifact_digest`. Existing accounts default to `GENERAL`
+rather than receiving guessed accounting semantics. Existing active model rows
+are deactivated and require an explicit administrator activation to pin and
+validate their artifacts.
+
+### Final Phase B verification
+
+```text
+Backend + ML tests                 PASS — 83 tests; 95% combined coverage
+Accounting-focused regression      PASS — 25 tests
+ML security-focused regression     PASS — 14 tests
+Frontend tests                     PASS — 19 tests
+TypeScript                         PASS
+Frontend production build          PASS — 47 modules
+Ruff (project-scoped)              PASS
+Strict mypy                        PASS — 82 source files
+PostgreSQL migration current       PASS — 20260827_0004 (head)
+Alembic drift check                PASS — no new upgrade operations
+PostgreSQL tax/concurrency probe   PASS — POSTED, REJECTED
+docker compose config              PASS
+docker compose up -d --build       PASS
+PostgreSQL                         healthy; accepting connections
+Backend liveness/readiness         HTTP 200 / HTTP 200 on host 8100
+Frontend                           healthy; HTTP 200 on host 4173
+Backend container pip check        PASS
+git diff --check                   PASS
+```
+
+The exact disposable database `azari_stage9_phase_b_test` was removed after the
+PostgreSQL probe. It contained verification data only.
+
+### Status and remaining issues
+
+Stage 9 Phase B is **PASS**, and the defined Stage 9 HIGH-remediation scope has
+passed full regression, PostgreSQL accounting, migration, and Docker checks.
+Stage 10 has not started. Remaining documented limitations include the absence
+of a jurisdiction-specific tax engine, no API for selecting a new open
+date/period when reversing a journal whose original period is closed, no
+historical invoice issuance timestamp, synthetic ML fitness limitations,
+unbundled licensed IRANSans assets, and the medium/low infrastructure and product
+risks retained in the Phase A audit.

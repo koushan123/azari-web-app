@@ -89,6 +89,10 @@ class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     category_id: UUID
     parent_id: UUID | None = None
+    posting_role: str = Field(
+        default="GENERAL",
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY)$",
+    )
 
 
 class AccountUpdate(BaseModel):
@@ -96,6 +100,10 @@ class AccountUpdate(BaseModel):
     category_id: UUID | None = None
     parent_id: UUID | None = None
     is_active: bool | None = None
+    posting_role: str | None = Field(
+        default=None,
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY)$",
+    )
 
 
 class AccountRead(ORMModel):
@@ -105,6 +113,7 @@ class AccountRead(ORMModel):
     category_id: UUID
     parent_id: UUID | None
     is_active: bool
+    posting_role: str
 
 
 class PeriodCreate(BaseModel):
@@ -202,6 +211,7 @@ class InvoiceRead(ORMModel):
 class InvoiceIssue(BaseModel):
     receivable_account_id: UUID
     revenue_account_id: UUID
+    tax_liability_account_id: UUID | None = None
 
 
 class AllocationCreate(BaseModel):

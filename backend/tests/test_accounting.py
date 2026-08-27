@@ -49,6 +49,7 @@ class Domain:
     cash: Account
     receivable: Account
     revenue: Account
+    tax_liability: Account
     period: FinancialPeriod
     customer: Party
     product: Product
@@ -64,18 +65,26 @@ def domain(session: Session) -> tuple[AccountingService, Domain]:
     )
     asset = AccountCategory(name="Assets", account_type="ASSET")
     revenue_category = AccountCategory(name="Revenue", account_type="REVENUE")
-    session.add_all([admin, asset, revenue_category])
+    liability = AccountCategory(name="Liabilities", account_type="LIABILITY")
+    session.add_all([admin, asset, revenue_category, liability])
     session.flush()
-    cash = Account(code="1000", name="Cash", category=asset)
-    receivable = Account(code="1100", name="Receivable", category=asset)
-    revenue = Account(code="4000", name="Sales", category=revenue_category)
+    cash = Account(code="1000", name="Cash", category=asset, posting_role="CASH")
+    receivable = Account(
+        code="1100", name="Receivable", category=asset, posting_role="RECEIVABLE"
+    )
+    revenue = Account(
+        code="4000", name="Sales", category=revenue_category, posting_role="REVENUE"
+    )
+    tax_liability = Account(
+        code="2100", name="Tax payable", category=liability, posting_role="TAX_LIABILITY"
+    )
     period = FinancialPeriod(name="2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31))
     customer = Party(name="Customer", is_customer=True)
     product = Product(sku="P-1", name="Service", unit="hour", unit_price=Decimal("100.00"))
-    session.add_all([cash, receivable, revenue, period, customer, product])
+    session.add_all([cash, receivable, revenue, tax_liability, period, customer, product])
     session.commit()
     return AccountingService(session, admin), Domain(
-        admin, cash, receivable, revenue, period, customer, product
+        admin, cash, receivable, revenue, tax_liability, period, customer, product
     )
 
 
@@ -143,6 +152,23 @@ def test_reversal_cannot_be_repeated_or_reversed() -> None:
             service.reverse_journal(reversal.id)
 
         assert len(session.scalars(select(JournalEntry)).all()) == 2
+
+
+def test_reversal_cannot_post_into_a_closed_period() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        original = service.create_journal(journal_data(values))
+        service.post_journal(original.id)
+        values.period.status = "CLOSED"
+        session.commit()
+
+        with pytest.raises(ConflictError, match="closed period"):
+            service.reverse_journal(original.id)
+
+        assert session.scalar(
+            select(JournalEntry).where(JournalEntry.reversal_of_id == original.id)
+        ) is None
+        assert original.status == "POSTED"
 
 
 @pytest.mark.parametrize(
@@ -216,6 +242,7 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
             InvoiceIssue(
                 receivable_account_id=values.receivable.id,
                 revenue_account_id=values.revenue.id,
+                tax_liability_account_id=values.tax_liability.id,
             ),
         )
         assert issued.status == "ISSUED"
@@ -225,7 +252,12 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
             line.credit
             for line in issued.journal.lines
             if line.account_id == values.revenue.id
-        ) == Decimal("275.00")
+        ) == Decimal("250.00")
+        assert next(
+            line.credit
+            for line in issued.journal.lines
+            if line.account_id == values.tax_liability.id
+        ) == Decimal("25.00")
         with pytest.raises(ConflictError, match="Source-document"):
             service.reverse_journal(issued.journal.id)
         failed = service.create_invoice(invoice_data(values, "I-2"))
@@ -238,6 +270,7 @@ def test_invoice_totals_issue_and_failed_issue_are_atomic() -> None:
                 InvoiceIssue(
                     receivable_account_id=values.receivable.id,
                     revenue_account_id=values.revenue.id,
+                    tax_liability_account_id=values.tax_liability.id,
                 ),
             )
         persisted = session.get(Invoice, failed.id)
@@ -256,6 +289,7 @@ def test_invoice_issue_requires_distinct_asset_receivable_and_revenue_accounts()
                 InvoiceIssue(
                     receivable_account_id=values.receivable.id,
                     revenue_account_id=values.receivable.id,
+                    tax_liability_account_id=values.tax_liability.id,
                 ),
             )
         with pytest.raises(AccountingError, match="REVENUE"):
@@ -264,6 +298,7 @@ def test_invoice_issue_requires_distinct_asset_receivable_and_revenue_accounts()
                 InvoiceIssue(
                     receivable_account_id=values.receivable.id,
                     revenue_account_id=values.cash.id,
+                    tax_liability_account_id=values.tax_liability.id,
                 ),
             )
 
@@ -271,12 +306,77 @@ def test_invoice_issue_requires_distinct_asset_receivable_and_revenue_accounts()
         assert invoice.status == "DRAFT" and invoice.journal_id is None
 
 
+def test_invoice_issue_rejects_broad_category_accounts_without_semantic_roles() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        generic_asset = Account(
+            code="1200", name="Generic asset", category=values.receivable.category
+        )
+        session.add(generic_asset)
+        session.commit()
+        invoice = service.create_invoice(invoice_data(values))
+
+        with pytest.raises(AccountingError, match="posting role RECEIVABLE"):
+            service.issue_invoice(
+                invoice.id,
+                InvoiceIssue(
+                    receivable_account_id=generic_asset.id,
+                    revenue_account_id=values.revenue.id,
+                    tax_liability_account_id=values.tax_liability.id,
+                ),
+            )
+
+
+def test_taxed_invoice_requires_liability_and_never_credits_tax_as_revenue() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        invoice = service.create_invoice(invoice_data(values))
+
+        with pytest.raises(AccountingError, match="tax liability account is required"):
+            service.issue_invoice(
+                invoice.id,
+                InvoiceIssue(
+                    receivable_account_id=values.receivable.id,
+                    revenue_account_id=values.revenue.id,
+                ),
+            )
+
+        issued = service.issue_invoice(
+            invoice.id,
+            InvoiceIssue(
+                receivable_account_id=values.receivable.id,
+                revenue_account_id=values.revenue.id,
+                tax_liability_account_id=values.tax_liability.id,
+            ),
+        )
+        journal = issued.journal
+        assert journal is not None
+        credits = {line.account_id: line.credit for line in journal.lines}
+        assert credits[values.revenue.id] == issued.subtotal
+        assert credits[values.tax_liability.id] == issued.tax
+
+
+def test_zero_value_invoice_is_rejected() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        data = invoice_data(values)
+        data.items[0].unit_price = Decimal("0")
+        data.items[0].tax = Decimal("0")
+
+        with pytest.raises(AccountingError, match="greater than zero"):
+            service.create_invoice(data)
+
+        assert session.scalar(select(Invoice).where(Invoice.invoice_number == "I-1")) is None
+
+
 def post_invoice(service: AccountingService, values: Domain, number: str = "I-1") -> Invoice:
     invoice = service.create_invoice(invoice_data(values, number))
     return service.issue_invoice(
         invoice.id,
         InvoiceIssue(
-            receivable_account_id=values.receivable.id, revenue_account_id=values.revenue.id
+            receivable_account_id=values.receivable.id,
+            revenue_account_id=values.revenue.id,
+            tax_liability_account_id=values.tax_liability.id,
         ),
     )
 
@@ -340,6 +440,7 @@ def test_payment_post_requires_distinct_accounts_and_matching_invoice_receivable
             code="1199",
             name="Other receivable",
             category=values.receivable.category,
+            posting_role="RECEIVABLE",
         )
         session.add(other_receivable)
         session.commit()
@@ -508,6 +609,12 @@ def test_posted_account_category_cannot_rewrite_historical_reports() -> None:
 
         session.refresh(values.receivable)
         assert values.receivable.category_id != expense.id
+
+        with pytest.raises(ConflictError, match="posting role"):
+            service.update_account(
+                values.receivable.id,
+                AccountUpdate(posting_role="CASH"),
+            )
 
 
 def test_invalid_invoice_and_payment_parties_and_products() -> None:

@@ -63,9 +63,13 @@ def main() -> None:
         revenues = AccountCategory(name="PG Revenue", account_type="REVENUE")
         session.add_all([actor, assets, revenues])
         session.flush()
-        cash = Account(code="PG-100", name="Cash", category=assets)
-        receivable = Account(code="PG-110", name="Receivable", category=assets)
-        revenue = Account(code="PG-400", name="Revenue", category=revenues)
+        cash = Account(code="PG-100", name="Cash", category=assets, posting_role="CASH")
+        receivable = Account(
+            code="PG-110", name="Receivable", category=assets, posting_role="RECEIVABLE"
+        )
+        revenue = Account(
+            code="PG-400", name="Revenue", category=revenues, posting_role="REVENUE"
+        )
         period = FinancialPeriod(
             name="PG 2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31)
         )

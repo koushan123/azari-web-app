@@ -117,9 +117,12 @@ def save_payment_risk_model(model: PaymentRiskModel, path: Path) -> None:
     )
 
 
-def load_payment_risk_model(path: Path) -> PaymentRiskModel:
+def load_payment_risk_model(path: Path, expected_digest: str | None = None) -> PaymentRiskModel:
     state, metadata = load_artifact(
-        path, pipeline="payment_delay_risk", expected_features=PAYMENT_FEATURES
+        path,
+        pipeline="payment_delay_risk",
+        expected_features=PAYMENT_FEATURES,
+        expected_digest=expected_digest,
     )
     return PaymentRiskModel(
         state["estimator"],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import importlib.metadata
 import json
 from dataclasses import asdict, dataclass
@@ -73,11 +74,10 @@ def save_artifact(path: Path, model: Any, metadata: ArtifactMetadata) -> None:
     )
 
 
-def load_artifact(
-    path: Path, *, pipeline: str, expected_features: list[str] | None = None
-) -> tuple[Any, ArtifactMetadata]:
-    raw = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
-    metadata = ArtifactMetadata(**raw)
+def _metadata(
+    raw: bytes, *, pipeline: str, expected_features: list[str] | None
+) -> ArtifactMetadata:
+    metadata = ArtifactMetadata(**json.loads(raw.decode("utf-8")))
     if metadata.schema_version != ARTIFACT_SCHEMA_VERSION:
         raise ValueError(f"Unsupported artifact schema: {metadata.schema_version}")
     if metadata.pipeline != pipeline:
@@ -87,4 +87,45 @@ def load_artifact(
             f"Incompatible feature schema: expected {expected_features}, "
             f"found {metadata.feature_schema}"
         )
-    return joblib.load(path / "model.joblib"), metadata
+    return metadata
+
+
+def inspect_artifact(
+    path: Path, *, pipeline: str, expected_features: list[str] | None = None
+) -> tuple[ArtifactMetadata, str]:
+    """Validate inert metadata and hash the artifact without deserializing it."""
+    metadata_raw = (path / "metadata.json").read_bytes()
+    metadata = _metadata(metadata_raw, pipeline=pipeline, expected_features=expected_features)
+    digest = sha256()
+    digest.update(b"metadata.json\0")
+    digest.update(metadata_raw)
+    digest.update(b"model.joblib\0")
+    with (path / "model.joblib").open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return metadata, digest.hexdigest()
+
+
+def load_artifact(
+    path: Path,
+    *,
+    pipeline: str,
+    expected_features: list[str] | None = None,
+    expected_digest: str | None = None,
+) -> tuple[Any, ArtifactMetadata]:
+    metadata_raw = (path / "metadata.json").read_bytes()
+    metadata = _metadata(metadata_raw, pipeline=pipeline, expected_features=expected_features)
+    with (path / "model.joblib").open("rb") as model_file:
+        digest = sha256()
+        digest.update(b"metadata.json\0")
+        digest.update(metadata_raw)
+        digest.update(b"model.joblib\0")
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+        actual_digest = digest.hexdigest()
+        if expected_digest is not None and not hmac.compare_digest(
+            actual_digest, expected_digest
+        ):
+            raise ValueError("Artifact integrity is not trusted")
+        model_file.seek(0)
+        return joblib.load(model_file), metadata

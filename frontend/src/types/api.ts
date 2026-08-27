@@ -7,7 +7,8 @@ export interface RegisterRequest { email: string; password: string; first_name: 
 export interface Party { id: UUID; name: string; email: string | null; phone: string | null; address: string | null; is_customer: boolean; is_supplier: boolean; is_active: boolean; created_at: string; updated_at: string }
 export interface Product { id: UUID; sku: string; name: string; description: string | null; unit: string; unit_price: Money; is_active: boolean; created_at: string; updated_at: string }
 export interface AccountCategory { id: UUID; name: string; account_type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE" }
-export interface Account { id: UUID; code: string; name: string; category_id: UUID; parent_id: UUID | null; is_active: boolean }
+export type AccountPostingRole = "GENERAL" | "CASH" | "RECEIVABLE" | "REVENUE" | "TAX_LIABILITY";
+export interface Account { id: UUID; code: string; name: string; category_id: UUID; parent_id: UUID | null; is_active: boolean; posting_role: AccountPostingRole }
 export interface Period { id: UUID; name: string; start_date: string; end_date: string; status: string }
 export interface JournalLine { id?: UUID; account_id: UUID; description: string | null; debit: Money; credit: Money }
 export interface Journal { id: UUID; entry_number: string; entry_date: string; description: string; period_id: UUID; status: string; reversal_of_id: UUID | null; lines: JournalLine[] }

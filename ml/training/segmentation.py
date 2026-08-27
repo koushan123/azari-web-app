@@ -123,9 +123,12 @@ def save_segmentation_model(model: SegmentationModel, path: Path) -> None:
     save_artifact(path, state, model.metadata)
 
 
-def load_segmentation_model(path: Path) -> SegmentationModel:
+def load_segmentation_model(path: Path, expected_digest: str | None = None) -> SegmentationModel:
     state, metadata = load_artifact(
-        path, pipeline="customer_segmentation", expected_features=SEGMENT_FEATURES
+        path,
+        pipeline="customer_segmentation",
+        expected_features=SEGMENT_FEATURES,
+        expected_digest=expected_digest,
     )
     return SegmentationModel(
         state["scaler"], state["estimator"], state["descriptions"], metadata

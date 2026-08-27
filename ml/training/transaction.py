@@ -101,9 +101,12 @@ def save_transaction_model(model: TransactionModel, path: Path) -> None:
     save_artifact(path, model.estimator, model.metadata)
 
 
-def load_transaction_model(path: Path) -> TransactionModel:
+def load_transaction_model(path: Path, expected_digest: str | None = None) -> TransactionModel:
     estimator, metadata = load_artifact(
-        path, pipeline="transaction_classification", expected_features=["description"]
+        path,
+        pipeline="transaction_classification",
+        expected_features=["description"],
+        expected_digest=expected_digest,
     )
     threshold = float(metadata.config["confidence_threshold"])
     return TransactionModel(estimator, metadata, threshold)

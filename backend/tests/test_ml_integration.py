@@ -25,6 +25,7 @@ from backend.app.db.models import (
 from backend.app.ml.registry import (
     ArtifactRegistry,
     ArtifactValidationError,
+    PredictionExecutionError,
     PredictionInputError,
 )
 from backend.app.schemas.ml import FeedbackRequest, TransactionClassifyRequest
@@ -133,6 +134,64 @@ def test_artifact_registry_rejects_missing_traversal_and_schema(
     with pytest.raises(ArtifactValidationError, match="validation failed"):
         ArtifactRegistry(broken_root).validate(
             "transaction_classification", "transaction/broken-v1"
+        )
+
+
+def test_registration_never_deserializes_and_tampered_artifact_cannot_activate(
+    ml_artifact_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_root = tmp_path / "models"
+    shutil.copytree(ml_artifact_dir, artifact_root)
+    settings = get_settings()
+    settings.ML_MODEL_DIR = artifact_root
+    load_calls = 0
+
+    def unsafe_load(*args: object, **kwargs: object) -> object:
+        nonlocal load_calls
+        load_calls += 1
+        raise AssertionError("untrusted joblib was deserialized")
+
+    monkeypatch.setattr("ml.common.joblib.load", unsafe_load)
+    with SessionLocal() as session:
+        actor = session.merge(add_user("ADMIN", "artifact-security@example.com"))
+        service = MLService(session, settings)
+        record = service.register_model(
+            "transaction_classification", "transaction/transaction-v1", actor
+        )
+        assert load_calls == 0
+
+        model_path = artifact_root / "transaction" / "transaction-v1" / "model.joblib"
+        with model_path.open("ab") as artifact:
+            artifact.write(b"tampered")
+
+        with pytest.raises(PredictionExecutionError, match="integrity") as failure:
+            service.activate_model(record.id, actor)
+        assert load_calls == 0
+        assert str(artifact_root) not in str(failure.value)
+
+
+def test_unpinned_artifact_cannot_be_loaded(ml_artifact_dir: Path) -> None:
+    registry = ArtifactRegistry(ml_artifact_dir)
+    with pytest.raises(ArtifactValidationError, match="not been approved"):
+        registry.load(
+            "transaction_classification", "transaction/transaction-v1", None
+        )
+
+
+def test_writable_artifact_cannot_load_as_a_production_model(
+    ml_artifact_dir: Path,
+) -> None:
+    registry = ArtifactRegistry(ml_artifact_dir, require_read_only=True)
+    _, digest = registry.validate(
+        "transaction_classification", "transaction/transaction-v1"
+    )
+    with pytest.raises(ArtifactValidationError, match="read-only"):
+        registry.load(
+            "transaction_classification",
+            "transaction/transaction-v1",
+            digest,
         )
 
 

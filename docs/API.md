@@ -59,6 +59,11 @@ return 401; authenticated users without the required permission receive 403.
 Clients provide invoice quantities, prices/taxes, and account selections but
 never trusted totals or derived statuses. Business conflicts return 409,
 domain validation failures return 422, and missing resources return 404.
+Invoice creation rejects a zero authoritative total. Issuance accepts exact
+`RECEIVABLE` and `REVENUE` posting-role accounts and, for nonzero tax, requires
+`tax_liability_account_id` with role `TAX_LIABILITY`. The journal debits the
+total receivable, credits only the subtotal to revenue, and credits tax to the
+liability account.
 
 Report endpoints accept ISO date filters. Statement/cash-flow endpoints accept
 `start_date` and `end_date`; balance sheet, receivables, payables, and dashboard

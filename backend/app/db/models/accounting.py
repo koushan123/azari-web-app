@@ -73,12 +73,19 @@ class Account(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("code", name="uq_accounts_code"),
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
+        CheckConstraint(
+            "posting_role IN ('GENERAL','CASH','RECEIVABLE','REVENUE','TAX_LIABILITY')",
+            name="valid_posting_role",
+        ),
     )
 
     code: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     category_id: Mapped[UUID] = mapped_column(ForeignKey("account_categories.id"))
     parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("accounts.id"))
+    posting_role: Mapped[str] = mapped_column(
+        String(20), default="GENERAL", server_default="GENERAL", nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     category: Mapped[AccountCategory] = relationship(back_populates="accounts")
     parent: Mapped["Account | None"] = relationship(remote_side="Account.id")

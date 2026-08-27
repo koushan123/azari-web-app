@@ -84,11 +84,17 @@ The lifecycle has four deliberately separate operations:
 1. **Training:** `scripts/train_ml.py` produces a versioned artifact offline.
 2. **Registration:** an `ml:manage` caller supplies a controlled identifier such
    as `transaction/transaction-v1`. The application resolves it only under
-   `ML_MODEL_DIR`, validates metadata/schema/features/runtime compatibility,
-   and stores metadata without returning a filesystem path.
+   `ML_MODEL_DIR`, validates inert metadata/schema/features/runtime
+   compatibility, hashes `metadata.json` and `model.joblib`, and stores the
+   digest without deserializing joblib or returning a filesystem path.
 3. **Inference:** an `ml:predict` caller uses the single active registry version.
-   A thread-safe per-process cache avoids loading joblib for every request;
-   activation invalidates the affected pipeline.
+   Explicit activation verifies the pinned SHA-256 digest before joblib is
+   deserialized. Loading rechecks the same open file content before
+   deserialization, and a thread-safe per-process cache avoids loading joblib
+   for every request; activation invalidates the affected pipeline.
+   When `APP_ENV=production`, the backend also refuses to load artifacts that
+   its process can write; production deployment must retain the read-only model
+   mount.
 4. **Feedback:** an `ml:feedback` caller appends a verified value, correction,
    or comment. The original prediction is never overwritten.
 

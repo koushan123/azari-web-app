@@ -82,11 +82,23 @@ def report_domain(session: Session) -> ReportDomain:
     }
     session.add_all([actor, *categories.values()])
     session.flush()
-    cash = Account(code="R-100", name="Cash", category=categories["ASSET"])
-    receivable = Account(code="R-110", name="Receivable", category=categories["ASSET"])
+    cash = Account(
+        code="R-100", name="Cash", category=categories["ASSET"], posting_role="CASH"
+    )
+    receivable = Account(
+        code="R-110",
+        name="Receivable",
+        category=categories["ASSET"],
+        posting_role="RECEIVABLE",
+    )
     payable = Account(code="R-200", name="Payable", category=categories["LIABILITY"])
     equity = Account(code="R-300", name="Capital", category=categories["EQUITY"])
-    revenue = Account(code="R-400", name="Revenue", category=categories["REVENUE"])
+    revenue = Account(
+        code="R-400",
+        name="Revenue",
+        category=categories["REVENUE"],
+        posting_role="REVENUE",
+    )
     expense = Account(code="R-500", name="Expense", category=categories["EXPENSE"])
     period = FinancialPeriod(
         name="Report 2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31)

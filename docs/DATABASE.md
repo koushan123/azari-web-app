@@ -60,3 +60,9 @@ model per pipeline. Additional indexes cover active lookup, prediction
 pipeline/time, model reference, source reference, and feedback lookup. Foreign
 keys use `RESTRICT` for model/prediction history and `SET NULL` for deleted user
 references. No prediction or feedback mutation/deletion API exists.
+
+Stage 9 Phase B migration `20260827_0004` adds `accounts.posting_role` and
+`ml_model_versions.artifact_digest`. Existing accounts become `GENERAL` rather
+than being guessed into a control role. Existing active model versions are
+deactivated and must be explicitly reactivated so their current SHA-256
+artifact digest is pinned before production deserialization.
