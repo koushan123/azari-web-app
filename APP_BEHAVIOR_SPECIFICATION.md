@@ -1,4 +1,4 @@
-# Azari Accounting — Application Behavior Specification
+﻿# Azari Accounting — Application Behavior Specification
 
 This document describes how the application **must behave from a user's point
 of view**. It is a review document, not a claim that every behavior is already
@@ -434,3 +434,4 @@ The browser must not silently block the form.
   داده‌ای پاک یا Reset شود.
 - برنامه نام IRANSans را در CSS دارد، اما فایل وب‌فونت دارای مجوز در مخزن نیست.
   برای تکمیل این نیاز باید فایل WOFF2 دارای مجوز فراهم و به‌صورت محلی میزبانی شود.
+
