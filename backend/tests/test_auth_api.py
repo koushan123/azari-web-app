@@ -174,3 +174,22 @@ def test_audit_events_never_store_credentials(client: TestClient) -> None:
         assert REGISTER_PAYLOAD["password"] not in serialized
         assert "password_hash" not in serialized
         assert "Bearer " not in serialized
+
+
+def test_login_rate_limit_returns_429_with_retry_guidance(client: TestClient) -> None:
+    responses = [login(client, email="limited@example.com", password="wrong") for _ in range(6)]
+
+    assert all(response.status_code == 401 for response in responses[:5])
+    assert responses[5].status_code == 429
+    assert responses[5].json() == {
+        "detail": "Too many authentication attempts. Try again later."
+    }
+    assert int(responses[5].headers["retry-after"]) > 0
+
+
+def test_registration_has_an_independent_rate_limit(client: TestClient) -> None:
+    responses = [register(client) for _ in range(6)]
+
+    assert responses[0].status_code == 201
+    assert all(response.status_code == 409 for response in responses[1:5])
+    assert responses[5].status_code == 429

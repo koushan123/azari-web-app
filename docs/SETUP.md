@@ -82,6 +82,95 @@ set together. The password must be 12–128 characters. Bootstrap is idempotent
 and never overwrites an existing user. Omit both in production and provision
 administrators through a controlled operational process.
 
+### Rotate PostgreSQL and JWT secrets without deleting data
+
+Changing `POSTGRES_PASSWORD` in `.env` does not change the password of a role
+inside an already initialized PostgreSQL volume. The repository therefore
+provides a manual rotation script that generates a 48-byte URL-safe database
+password and a separate 64-byte URL-safe JWT secret. It executes `ALTER ROLE`
+against the running database, then atomically updates `POSTGRES_PASSWORD`,
+`DATABASE_URL`, and `JWT_SECRET` in `.env`. Secret values are never printed.
+
+Run this yourself from the repository root during a maintenance window:
+
+```powershell
+.\scripts\rotate_secrets.ps1
+docker compose up -d --force-recreate backend
+docker compose ps
+curl.exe -i http://localhost:8100/api/v1/health
+```
+
+The first command requires the existing `db` service to be running and performs
+the live role-password update without recreating `postgres_data`. Existing JWT
+access tokens become invalid after the backend is recreated, so users must sign
+in again. Back up the database first and never paste generated values into logs,
+shell history, tickets, or chat. If a deployment uses an external secret store,
+perform the equivalent `ALTER ROLE` transaction and update the secret store
+instead of using this local `.env` helper.
+
+The repository ignores `.env`; verify that remains true with:
+
+```powershell
+git check-ignore -v .env
+git log --all --full-history -- .env
+```
+
+The second command must produce no history when `.env` has never been committed.
+
+## Database backup and restore
+
+Create a timestamped plain-SQL PostgreSQL backup while the Compose database
+is running:
+
+```powershell
+$backup = .\scripts\backup_db.ps1
+$backup
+```
+
+Backups are written to the ignored `backups/db/` directory by default. Pass
+`-OutputDirectory D:\secure\azari-backups` to store them on separate protected
+storage. Copy backups off the application host, encrypt them at rest, restrict
+access, and test restoration regularly.
+
+Restore always targets a new database and refuses to overwrite the active
+`POSTGRES_DB` or any database that already exists:
+
+```powershell
+.\scripts\restore_db.ps1 -BackupPath $backup -TargetDatabase azari_restore_test
+docker compose exec -T db psql -U azari -d azari_restore_test -c "SELECT version_num FROM alembic_version;"
+```
+
+Validate the restored database before changing any deployment connection. For
+a disaster recovery cutover, stop application writes, restore to a new database,
+validate migrations and business data, then change the deployment's database
+URL in a separately reviewed operation. The script deliberately does not drop
+or overwrite the production database.
+
+## Production HTTP hardening
+
+Set `APP_ENV=production` to disable `/docs`, `/redoc`, and `/openapi.json` and
+return a generic response for unexpected server errors. The API sends restrictive
+JSON-oriented security headers and emits HSTS only when the request is HTTPS.
+The frontend Nginx image sends browser security headers but does not claim HSTS
+over plain HTTP.
+
+Login and registration have a process-local, per-client-IP sliding-window limit,
+configured with `AUTH_RATE_LIMIT_ATTEMPTS` and
+`AUTH_RATE_LIMIT_WINDOW_SECONDS`. This is intentionally suitable only for the
+current single backend instance. Before adding workers or replicas, replace it
+with a shared limiter. At a reverse proxy, accept forwarded client IPs only from
+trusted proxy addresses; do not trust arbitrary client-supplied forwarding
+headers.
+
+### Future TLS termination runbook
+
+TLS certificates and termination are not configured by this stage. Before an
+internet-facing deployment: terminate TLS at a maintained reverse proxy or load
+balancer, redirect HTTP to HTTPS, set the frontend API URL to its HTTPS origin,
+restrict CORS and CSP to the deployed origins, forward the original scheme from
+trusted proxies, and confirm HSTS appears only on HTTPS responses. Validate
+certificate renewal and rollback in staging before enabling HSTS in production.
+
 ## Clean database
 
 On a clean PostgreSQL database, run the Alembic and bootstrap commands above.

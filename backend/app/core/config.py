@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     JWT_SECRET: SecretStr
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=5, le=1440)
+    AUTH_RATE_LIMIT_ATTEMPTS: int = Field(default=5, ge=1, le=100)
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=60, ge=1, le=3600)
     CORS_ORIGINS: list[str] = Field(default_factory=lambda: ["http://localhost:4173"])
     ML_MODEL_DIR: Path = Path("ml/models")
     ML_CONFIDENCE_THRESHOLD: float = Field(default=0.65, ge=0, le=1)
