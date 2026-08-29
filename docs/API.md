@@ -8,7 +8,7 @@ The API is rooted at `/api/v1`; interactive OpenAPI documentation is served at
 | GET | `/health` | Public | Process liveness; does not query dependencies |
 | GET | `/ready` | Public | Readiness; succeeds only when PostgreSQL is reachable |
 | POST | `/auth/register` | Public | Create a normalized VIEWER account |
-| POST | `/auth/login` | Public | Exchange JSON email/password for a bearer token |
+| POST | `/auth/login` | Public | Exchange email/password or phone/password for a bearer token |
 | GET | `/auth/me` | Authenticated | Return the safe current-user representation |
 | GET | `/users` | `users:read` | Return safe user records |
 | POST/GET/PATCH | `/parties[/{id}]` | `parties:write/read` | Maintain counterparties |
@@ -50,9 +50,11 @@ is intentionally rejected.
 | GET | `/ml/predictions[/{id}]` | `ml:read` | Read append-oriented prediction history |
 | POST | `/ml/predictions/{id}/feedback` | `ml:feedback` | Append feedback or a comment |
 
-Registration accepts `email`, `password`, `first_name`, and `last_name`. Extra
-fields are rejected, so callers cannot inject an ADMIN role. Passwords must be
-12–128 characters and are never returned. Login returns
+Registration accepts optional `email` and `phone_number` fields and requires at
+least one of them, plus `password`, `first_name`, and `last_name`. Phone numbers
+use E.164 format. Extra fields are rejected, so callers cannot inject an ADMIN
+role. Passwords must be 12–128 characters and are never returned. Login accepts
+exactly one of `email` or `phone_number` with the password and returns
 `{"access_token":"...","token_type":"bearer"}`. Missing/invalid/expired tokens
 return 401; authenticated users without the required permission receive 403.
 

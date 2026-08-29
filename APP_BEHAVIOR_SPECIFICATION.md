@@ -40,14 +40,17 @@ Persian version follows it.
 ### 3. Registration, login, and sessions
 
 - The login page provides visible actions for both **Login** and **Register**.
-- Registration asks for first name, last name, email, password, and password
-  confirmation. Passwords must contain 12–128 characters.
+- Registration asks for first name, last name, email and phone number, password,
+  and password confirmation. At least one of email or phone number is required;
+  either or both may be supplied. Passwords must contain 12–128 characters.
+- Login accepts either the account's email address or E.164 phone number with
+  the password.
 - Registration creates a safe non-administrator account. A public request can
   never choose or inject an administrator role.
 - After successful registration, the user is logged in and taken to the first
   page their role is allowed to access.
-- Duplicate email, invalid input, incorrect credentials, expired sessions, and
-  network failures must be explained in Persian.
+- Duplicate email or phone number, invalid input, incorrect credentials, expired
+  sessions, and network failures must be explained in Persian.
 - Logout removes the local session and returns the user to login.
 
 ### 4. Users, roles, and permissions
@@ -266,13 +269,15 @@ The browser must not silently block the form.
 ### ۳. ثبت‌نام، ورود و نشست کاربری
 
 - صفحه ورود باید هر دو گزینه روشن «ورود» و «ثبت‌نام» را داشته باشد.
-- ثبت‌نام شامل نام، نام خانوادگی، ایمیل، رمز عبور و تکرار رمز عبور است. طول رمز
-  عبور باید بین ۱۲ تا ۱۲۸ نویسه باشد.
+- ثبت‌نام شامل نام، نام خانوادگی، ایمیل، شماره تلفن، رمز عبور و تکرار رمز عبور
+  است. واردکردن حداقل یکی از ایمیل یا شماره تلفن الزامی است و کاربر می‌تواند هر
+  دو را نیز وارد کند. طول رمز عبور باید بین ۱۲ تا ۱۲۸ نویسه باشد.
+- ورود با ایمیل یا شماره تلفن استاندارد E.164 به‌همراه رمز عبور انجام می‌شود.
 - ثبت‌نام عمومی فقط حساب امن و غیرمدیر می‌سازد و کاربر نمی‌تواند نقش مدیر را به
   درخواست تزریق کند.
 - پس از ثبت‌نام موفق، کاربر وارد برنامه می‌شود و به اولین صفحه مجاز هدایت می‌شود.
-- ایمیل تکراری، اطلاعات نامعتبر، رمز اشتباه، پایان نشست و خطای شبکه باید با پیام
-  فارسی روشن نمایش داده شوند.
+- ایمیل یا شماره تلفن تکراری، اطلاعات نامعتبر، رمز اشتباه، پایان نشست و خطای شبکه
+  باید با پیام فارسی روشن نمایش داده شوند.
 - خروج باید نشست محلی را پاک کند و کاربر را به صفحه ورود برگرداند.
 
 ### ۴. کاربران، نقش‌ها و مجوزها

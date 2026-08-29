@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, configureApi } from "../services/api";
 import type { RegisterRequest, User } from "../types/api";
 
-interface AuthState { user: User | null; loading: boolean; login: (email: string, password: string) => Promise<void>; register: (data: RegisterRequest) => Promise<void>; logout: () => void; can: (permission: string) => boolean }
+interface AuthState { user: User | null; loading: boolean; login: (identifier: string, password: string) => Promise<void>; register: (data: RegisterRequest) => Promise<void>; logout: () => void; can: (permission: string) => boolean }
 const AuthContext = createContext<AuthState | null>(null);
 const TOKEN_KEY = "azari_token";
 
@@ -16,8 +16,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!token) { setLoading(false); return; }
     setLoading(true); api.me().then(setUser).catch(logout).finally(() => setLoading(false));
   }, [token, logout]);
-  const login = useCallback(async (email: string, password: string) => { const result = await api.login(email, password); sessionStorage.setItem(TOKEN_KEY, result.access_token); setToken(result.access_token); configureApi(() => result.access_token, logout); setUser(await api.me()); }, [logout]);
-  const register = useCallback(async (data: RegisterRequest) => { await api.register(data); await login(data.email, data.password); }, [login]);
+  const login = useCallback(async (identifier: string, password: string) => { const result = await api.login(identifier, password); sessionStorage.setItem(TOKEN_KEY, result.access_token); setToken(result.access_token); configureApi(() => result.access_token, logout); setUser(await api.me()); }, [logout]);
+  const register = useCallback(async (data: RegisterRequest) => { await api.register(data); await login(data.email ?? data.phone_number!, data.password); }, [login]);
   const value = useMemo<AuthState>(() => ({ user, loading, login, register, logout, can: (permission) => Boolean(user?.permissions.includes(permission)) }), [user, loading, login, register, logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

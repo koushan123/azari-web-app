@@ -45,6 +45,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
+        CheckConstraint(
+            "email IS NOT NULL OR phone_number IS NOT NULL",
+            name="contact_method_required",
+        ),
         CheckConstraint("plan_status IN ('FREE','PRO')", name="valid_plan_status"),
         Index(
             "uq_users_phone_number_not_null",
@@ -55,7 +59,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
-    email: Mapped[str] = mapped_column(String(320), index=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320), index=True, nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)

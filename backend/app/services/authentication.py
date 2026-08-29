@@ -34,8 +34,8 @@ class AuthenticationService:
         self.audit = AuditRepository(session)
 
     def register(self, data: RegisterRequest) -> User:
-        email = normalize_email(str(data.email))
-        if self.users.get_by_email(email) is not None:
+        email = normalize_email(str(data.email)) if data.email is not None else None
+        if email is not None and self.users.get_by_email(email) is not None:
             self.audit.record(
                 action="identity.registration",
                 resource_type="user",
@@ -84,15 +84,24 @@ class AuthenticationService:
         return user
 
     def login(self, data: LoginRequest) -> tuple[User, str]:
-        email = normalize_email(str(data.email))
-        user = self.users.get_by_email(email)
+        if data.email is not None:
+            identifier = normalize_email(str(data.email))
+            identifier_type = "email"
+            user = self.users.get_by_email(identifier)
+        else:
+            assert data.phone_number is not None
+            identifier = data.phone_number
+            identifier_type = "phone_number"
+            user = self.users.get_by_phone_number(identifier)
         if user is None:
             hash_password(data.password)
-            self._record_failed_login(email=email)
-            raise AuthenticationError("Invalid email or password")
+            self._record_failed_login(identifier_type=identifier_type, identifier=identifier)
+            raise AuthenticationError("Invalid email, phone number, or password")
         if not user.is_active or not verify_password(data.password, user.password_hash):
-            self._record_failed_login(email=email, actor=user)
-            raise AuthenticationError("Invalid email or password")
+            self._record_failed_login(
+                identifier_type=identifier_type, identifier=identifier, actor=user
+            )
+            raise AuthenticationError("Invalid email, phone number, or password")
 
         user.last_login_at = datetime.now(UTC)
         self.audit.record(
@@ -105,13 +114,15 @@ class AuthenticationService:
         self.session.commit()
         return user, create_access_token(user.id)
 
-    def _record_failed_login(self, *, email: str, actor: User | None = None) -> None:
+    def _record_failed_login(
+        self, *, identifier_type: str, identifier: str, actor: User | None = None
+    ) -> None:
         self.audit.record(
             action="identity.login",
             resource_type="user",
             resource_id=str(actor.id) if actor else None,
             actor_id=actor.id if actor else None,
             success=False,
-            details={"email": email, "reason": "credentials_rejected"},
+            details={identifier_type: identifier, "reason": "credentials_rejected"},
         )
         self.session.commit()

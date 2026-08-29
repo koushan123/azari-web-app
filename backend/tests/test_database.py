@@ -28,6 +28,10 @@ def test_stage_two_tables_and_constraints_exist() -> None:
         item["name"] == "ck_users_valid_plan_status"
         for item in inspector.get_check_constraints("users")
     )
+    assert any(
+        item["name"] == "ck_users_contact_method_required"
+        for item in inspector.get_check_constraints("users")
+    )
 
 
 def test_rbac_bootstrap_is_idempotent() -> None:

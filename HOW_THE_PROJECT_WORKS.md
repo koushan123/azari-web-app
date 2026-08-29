@@ -128,7 +128,7 @@ FastAPI creates a synchronous SQLAlchemy session per request. Services apply bus
 
 ```mermaid
 flowchart LR
-    R[Register email + 12–128 char password] --> N[Normalize email]
+    R[Register email and/or E.164 phone + 12–128 char password] --> N[Normalize identity]
     N --> H[Argon2id password hash]
     H --> V[Create active user with VIEWER role]
     V --> L[Client immediately logs in]
@@ -176,7 +176,7 @@ The other important actions use the same boundary pattern:
 
 | Action | Frontend → API | Authoritative service/transaction result |
 |---|---|---|
-| Login | Email/password → `POST /auth/login`; then `/auth/me` | Normalize/verify Argon2id, update last login, audit, issue JWT; client stores token |
+| Login | Email/password or phone/password → `POST /auth/login`; then `/auth/me` | Normalize/verify Argon2id, update last login, audit, issue JWT; client stores token |
 | Register | Identity/password → `POST /auth/register`; then login | Normalize, reject duplicate, hash, create active VIEWER and audit |
 | Issue invoice | User chooses receivable/revenue accounts → `POST /invoices/{id}/issue` | Re-read DRAFT, find period, create balanced journal, post it and mark/link ISSUED atomically |
 | Create payment | Load active customers and their issued/partial invoices → `POST /payments` | Validate exact allocation sum/customer/balances and store DRAFT payment/allocations |
@@ -193,7 +193,7 @@ Failures before commit leave no partial aggregate. Failures after a service has 
 
 ### 5.1 Authentication rules
 
-- Emails are trimmed and case-folded before lookup. Duplicate registration returns a conflict.
+- Registration requires at least one unique email address or E.164 phone number. Emails are trimmed and case-folded before lookup; either identity can be used to log in. Duplicate registration returns a conflict.
 - Passwords are stored only as Argon2id hashes. A nonexistent login still performs a dummy hash verification to reduce account-enumeration timing differences.
 - JWT decoding requires `sub`, `type`, `iat`, `exp`, and `jti`; `type` must be `access`, and the configured algorithm must be HS256, HS384, or HS512.
 - Every protected request reloads the user; missing or inactive users receive 401. A valid user missing a permission receives 403.
@@ -933,7 +933,7 @@ sequenceDiagram
 
 ## ۴. ثبت‌نام، ورود، JWT و کنترل دسترسی
 
-در ثبت‌نام، ایمیل trim و case-fold می‌شود، رمز باید بین ۱۲ تا ۱۲۸ نویسه باشد و با Argon2id هش می‌شود. حساب جدید فعال و فقط با نقش `VIEWER` ساخته می‌شود. رابط پس از ثبت‌نام، همان کاربر را وارد می‌کند و توکن را در `sessionStorage` با کلید `azari_token` نگه می‌دارد.
+در ثبت‌نام، حداقل یکی از ایمیل یا شماره تلفن E.164 لازم است و واردکردن هر دو نیز مجاز است. ایمیل trim و case-fold می‌شود، رمز باید بین ۱۲ تا ۱۲۸ نویسه باشد و با Argon2id هش می‌شود. ورود با ایمیل یا شماره تلفن انجام می‌شود. حساب جدید فعال و فقط با نقش `VIEWER` ساخته می‌شود. رابط پس از ثبت‌نام، همان کاربر را وارد می‌کند و توکن را در `sessionStorage` با کلید `azari_token` نگه می‌دارد.
 
 توکن شامل `sub`، نوع `access`، زمان صدور، انقضا و `jti` است. مدت پیش‌فرض ۳۰ دقیقه و بازه مجاز ۵ تا ۱۴۴۰ دقیقه است. هر درخواست حفاظت‌شده دوباره وجود و فعال‌بودن کاربر را بررسی می‌کند. هویت نامعتبر یا غیرفعال پاسخ ۴۰۱ می‌گیرد؛ کاربر معتبر بدون مجوز پاسخ ۴۰۳. نبود کاربر در ورود نیز یک بررسی هش ساختگی انجام می‌دهد تا تفاوت زمانی، وجود ایمیل را لو ندهد.
 
@@ -966,7 +966,7 @@ sequenceDiagram
 
 | جدول | کاربرد | قیدهای اصلی |
 |---|---|---|
-| `users` | ایمیل، هش رمز، نام، وضعیت فعال، آخرین ورود | ایمیل یکتا؛ ارتباط چندبه‌چند با نقش |
+| `users` | ایمیل اختیاری، شماره تلفن اختیاری، هش رمز، نام، وضعیت فعال، آخرین ورود | حداقل یکی از ایمیل/تلفن لازم و هرکدام در صورت وجود یکتا؛ ارتباط چندبه‌چند با نقش |
 | `roles` | نقش‌های چهارگانه | نام یکتا؛ ارتباط با کاربر و مجوز |
 | `permissions` | رشته مجوز جزئی | نام یکتا |
 | `user_roles` | واسط کاربر و نقش | کلید مرکب و cascade |

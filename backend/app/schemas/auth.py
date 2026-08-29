@@ -2,13 +2,13 @@ import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: EmailStr
+    email: EmailStr | None = None
     phone_number: str | None = None
     password: str = Field(min_length=12, max_length=128)
     first_name: str = Field(min_length=1, max_length=100)
@@ -21,12 +21,32 @@ class RegisterRequest(BaseModel):
             raise ValueError("Phone number must use E.164 format")
         return value
 
+    @model_validator(mode="after")
+    def require_contact_method(self) -> "RegisterRequest":
+        if self.email is None and self.phone_number is None:
+            raise ValueError("Email or phone number is required")
+        return self
+
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: EmailStr
+    email: EmailStr | None = None
+    phone_number: str | None = None
     password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str | None) -> str | None:
+        if value is not None and re.fullmatch(r"\+[1-9]\d{7,14}", value) is None:
+            raise ValueError("Phone number must use E.164 format")
+        return value
+
+    @model_validator(mode="after")
+    def require_one_identifier(self) -> "LoginRequest":
+        if (self.email is None) == (self.phone_number is None):
+            raise ValueError("Provide exactly one of email or phone number")
+        return self
 
 
 class TokenResponse(BaseModel):
@@ -38,7 +58,7 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    email: EmailStr
+    email: EmailStr | None
     phone_number: str | None
     first_name: str
     last_name: str

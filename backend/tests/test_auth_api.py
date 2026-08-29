@@ -66,6 +66,51 @@ def test_registration_persists_optional_phone_number_and_free_plan(
         assert user.plan_status == "FREE"
 
 
+def test_phone_only_registration_and_login(client: TestClient) -> None:
+    response = register(client, email=None, phone_number="+989121234567")
+    assert response.status_code == 201
+    assert response.json()["email"] is None
+    assert response.json()["phone_number"] == "+989121234567"
+
+    logged_in = client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": "+989121234567", "password": REGISTER_PAYLOAD["password"]},
+    )
+    assert logged_in.status_code == 200
+    token = logged_in.json()["access_token"]
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["email"] is None
+    assert me.json()["phone_number"] == "+989121234567"
+
+
+def test_registration_requires_email_or_phone_number(client: TestClient) -> None:
+    assert register(client, email=None, phone_number=None).status_code == 422
+
+
+def test_login_requires_one_valid_email_or_phone_number(client: TestClient) -> None:
+    password = str(REGISTER_PAYLOAD["password"])
+    assert client.post("/api/v1/auth/login", json={"password": password}).status_code == 422
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "alice@example.com",
+                "phone_number": "+989121234567",
+                "password": password,
+            },
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"phone_number": "09121234567", "password": password},
+        ).status_code
+        == 422
+    )
+
+
 def test_registration_rejects_malformed_phone_number(client: TestClient) -> None:
     for malformed in ("09121234567", "+98 9121234567", "+01234567", "+123"):
         assert register(client, phone_number=malformed).status_code == 422
@@ -142,7 +187,10 @@ def test_wrong_nonexistent_and_inactive_login_are_rejected_and_audited(client: T
         login(client, email="missing@example.com"),
     ]
     assert all(response.status_code == 401 for response in responses)
-    assert all(response.json()["detail"] == "Invalid email or password" for response in responses)
+    assert all(
+        response.json()["detail"] == "Invalid email, phone number, or password"
+        for response in responses
+    )
 
     with SessionLocal() as session:
         failures = session.scalars(

@@ -35,8 +35,10 @@ reference.
 
 ## Stage 2 identity API
 
-- `POST /api/v1/auth/register` creates a normalized, Argon2-hashed VIEWER account.
-- `POST /api/v1/auth/login` returns a short-lived bearer access token.
+- `POST /api/v1/auth/register` creates an Argon2-hashed VIEWER account with at
+  least one unique email address or E.164 phone number.
+- `POST /api/v1/auth/login` accepts either email/password or phone/password and
+  returns a short-lived bearer access token.
 - `GET /api/v1/auth/me` returns the authenticated user without password data.
 - `GET /api/v1/users` requires the database permission `users:read`.
 
