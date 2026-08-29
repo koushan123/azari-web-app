@@ -35,7 +35,7 @@ reference.
 
 ## Stage 2 identity API
 
-- `POST /api/v1/auth/register` creates an Argon2-hashed VIEWER account with at
+- `POST /api/v1/auth/register` creates an Argon2-hashed ADMIN account with at
   least one unique email address or E.164 phone number.
 - `POST /api/v1/auth/login` accepts either email/password or phone/password and
   returns a short-lived bearer access token.

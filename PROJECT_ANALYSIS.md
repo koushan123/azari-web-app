@@ -187,8 +187,9 @@ role-permission links, and append-oriented audit events. It deliberately adds no
 accounting, reporting, or ML tables.
 
 Passwords use Argon2id. JWT access tokens use the configured HMAC algorithm,
-secret, and lifetime. Public registration is fixed to VIEWER and rejects extra
-role input. Authorization resolves database permissions inherited across all
+secret, and lifetime. Stage 2 originally fixed public registration to VIEWER;
+the current owner-directed policy assigns ADMIN while still rejecting role
+input. Authorization resolves database permissions inherited across all
 roles through centralized FastAPI dependencies. Registration and login
 success/failure create audit events, while audit metadata rejects sensitive-key
 payloads.

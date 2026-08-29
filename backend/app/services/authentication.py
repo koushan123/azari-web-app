@@ -11,7 +11,7 @@ from backend.app.repositories.roles import RoleRepository
 from backend.app.repositories.users import UserRepository
 from backend.app.schemas.auth import LoginRequest, RegisterRequest
 
-PUBLIC_REGISTRATION_ROLE = "VIEWER"
+PUBLIC_REGISTRATION_ROLE = "ADMIN"
 
 
 class DuplicateEmailError(ValueError):

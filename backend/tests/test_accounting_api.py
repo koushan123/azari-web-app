@@ -37,6 +37,11 @@ def test_accounting_api_requires_authentication_and_permission(client: TestClien
             "last_name": "Only",
         },
     )
+    with SessionLocal.begin() as session:
+        user = session.scalar(select(User).where(User.email == "viewer@example.com"))
+        viewer = session.scalar(select(Role).where(Role.name == "VIEWER"))
+        assert user is not None and viewer is not None
+        user.roles = [viewer]
     token = client.post(
         "/api/v1/auth/login",
         json={"email": "viewer@example.com", "password": "viewer-password-123"},

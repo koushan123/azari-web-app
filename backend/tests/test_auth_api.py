@@ -2,7 +2,7 @@ from typing import cast
 
 from backend.app.core.passwords import hash_password
 from backend.app.db.database import SessionLocal
-from backend.app.db.models import AuditEvent, Role, User
+from backend.app.db.models import AuditEvent, User
 from fastapi.testclient import TestClient
 from httpx import Response
 from sqlalchemy import select
@@ -29,7 +29,7 @@ def login(
     )
 
 
-def test_registration_normalizes_email_assigns_viewer_and_hides_password(
+def test_registration_normalizes_email_assigns_admin_and_hides_password(
     client: TestClient,
 ) -> None:
     response = register(client)
@@ -38,7 +38,9 @@ def test_registration_normalizes_email_assigns_viewer_and_hides_password(
     assert body["email"] == "alice@example.com"
     assert body["phone_number"] is None
     assert body["plan_status"] == "FREE"
-    assert body["roles"] == ["VIEWER"]
+    assert body["roles"] == ["ADMIN"]
+    assert "invoices:write" in body["permissions"]
+    assert "users:manage" in body["permissions"]
     assert "password" not in body
     assert "password_hash" not in body
 
@@ -221,22 +223,10 @@ def test_missing_malformed_and_inactive_tokens_are_unauthorized(client: TestClie
     )
 
 
-def test_permission_enforcement_for_viewer_and_multiple_roles(client: TestClient) -> None:
+def test_registered_admin_can_access_user_management(client: TestClient) -> None:
     register(client)
-    viewer_token = login(client).json()["access_token"]
-    assert (
-        client.get("/api/v1/users", headers={"Authorization": f"Bearer {viewer_token}"}).status_code
-        == 403
-    )
-
-    with SessionLocal.begin() as session:
-        user = session.scalar(select(User).where(User.email == "alice@example.com"))
-        manager = session.scalar(select(Role).where(Role.name == "MANAGER"))
-        accountant = session.scalar(select(Role).where(Role.name == "ACCOUNTANT"))
-        assert user is not None and manager is not None and accountant is not None
-        user.roles = [manager, accountant]
-
-    authorized = client.get("/api/v1/users", headers={"Authorization": f"Bearer {viewer_token}"})
+    token = login(client).json()["access_token"]
+    authorized = client.get("/api/v1/users", headers={"Authorization": f"Bearer {token}"})
     assert authorized.status_code == 200
     assert authorized.json()[0]["email"] == "alice@example.com"
 

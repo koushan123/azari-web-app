@@ -7,7 +7,7 @@ The API is rooted at `/api/v1`; interactive OpenAPI documentation is served at
 | --- | --- | --- | --- |
 | GET | `/health` | Public | Process liveness; does not query dependencies |
 | GET | `/ready` | Public | Readiness; succeeds only when PostgreSQL is reachable |
-| POST | `/auth/register` | Public | Create a normalized VIEWER account |
+| POST | `/auth/register` | Public | Create a full-access ADMIN account |
 | POST | `/auth/login` | Public | Exchange email/password or phone/password for a bearer token |
 | GET | `/auth/me` | Authenticated | Return the safe current-user representation |
 | GET | `/users` | `users:read` | Return safe user records |
@@ -57,6 +57,10 @@ role. Passwords must be 12–128 characters and are never returned. Login accept
 exactly one of `email` or `phone_number` with the password and returns
 `{"access_token":"...","token_type":"bearer"}`. Missing/invalid/expired tokens
 return 401; authenticated users without the required permission receive 403.
+
+Public registration deliberately assigns `ADMIN`, so every registrant receives
+all application and user-management permissions. A deployment exposed to
+untrusted users must disable or redesign public registration before production.
 
 Clients provide invoice quantities, prices/taxes, and account selections but
 never trusted totals or derived statuses. Business conflicts return 409,

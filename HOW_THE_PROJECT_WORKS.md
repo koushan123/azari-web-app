@@ -130,14 +130,14 @@ FastAPI creates a synchronous SQLAlchemy session per request. Services apply bus
 flowchart LR
     R[Register email and/or E.164 phone + 12–128 char password] --> N[Normalize identity]
     N --> H[Argon2id password hash]
-    H --> V[Create active user with VIEWER role]
+    H --> V[Create active user with ADMIN role]
     V --> L[Client immediately logs in]
     L --> J[JWT: sub, type, iat, exp, jti]
     J --> S[sessionStorage azari_token]
     S --> M[GET /auth/me]
 ```
 
-Registration is public and always assigns `VIEWER`; it is not a way to create an accountant. The bootstrap administrator or a future administration workflow must grant a more powerful role directly/externally. The token is an HMAC access token with a configurable 5–1440 minute lifetime (30 minutes by default). There is no refresh token, server-side revocation list, password reset, email verification, MFA, or login rate limiter.
+Registration is public and always assigns `ADMIN`, giving the new user every seeded application permission immediately. This owner-directed behavior makes an internet-exposed registration page an administrator-enrollment endpoint; production deployment requires an additional trust boundary or a redesigned onboarding policy. The token is an HMAC access token with a configurable 5–1440 minute lifetime (30 minutes by default). There is no refresh token, server-side revocation list, password reset, email verification, or MFA.
 
 ### 4.3 Accounting write
 
@@ -177,7 +177,7 @@ The other important actions use the same boundary pattern:
 | Action | Frontend → API | Authoritative service/transaction result |
 |---|---|---|
 | Login | Email/password or phone/password → `POST /auth/login`; then `/auth/me` | Normalize/verify Argon2id, update last login, audit, issue JWT; client stores token |
-| Register | Identity/password → `POST /auth/register`; then login | Normalize, reject duplicate, hash, create active VIEWER and audit |
+| Register | Identity/password → `POST /auth/register`; then login | Normalize, reject duplicate, hash, create active ADMIN and audit |
 | Issue invoice | User chooses receivable/revenue accounts → `POST /invoices/{id}/issue` | Re-read DRAFT, find period, create balanced journal, post it and mark/link ISSUED atomically |
 | Create payment | Load active customers and their issued/partial invoices → `POST /payments` | Validate exact allocation sum/customer/balances and store DRAFT payment/allocations |
 | Post payment | Choose cash/receivable accounts → `POST /payments/{id}/post` | Recheck balance, post journal, update all invoice balances/statuses and payment in one commit |
@@ -234,7 +234,7 @@ ml:read, ml:train, ml:predict, ml:manage, ml:feedback
 
 ACCOUNTANT receives both generic accounting permissions, reports, ML read/predict/feedback, and every specialized accounting read/write/post/issue/manage permission. MANAGER receives users read, generic accounting read, reports, ML read/predict/feedback, and specialized accounting reads. VIEWER receives generic accounting read, reports, ML read, and specialized accounting reads. There is no `periods:write`; both create and close use `periods:manage`.
 
-**Practical consequence:** a newly registered user is a `VIEWER`. That user can see invoices if permitted by the seeded role but cannot create or issue one. The missing “new invoice” action is therefore current RBAC behavior, not a failed submit.
+**Practical consequence:** a newly registered user is an `ADMIN`, so invoice creation and every other seeded application action are available immediately. Because registration is public, this is safe only where access to the registration page is already trusted.
 
 ## 6. Database model and migrations
 
@@ -707,7 +707,7 @@ Backend tests default to an in-memory SQLite database with static pooling, creat
 | 6 | Production ML integration | Three ML tables/migration; safe registry/cache, active version, inference/history/feedback APIs and RBAC | API/DB/artifact/security and live controlled-model checks |
 | 7 | Persian production client | React/Vite/Nginx SPA, JWT/RBAC contexts, operational/report/AI route families | TypeScript, frontend tests/build and Compose reachability |
 | 8 | Production-hardening pass | Responsive/accessibility/error/prerequisite improvements, non-root image and broader regression evidence; no new accounting model | 68 then-current backend/ML tests, 17 then-current frontend tests, lint/type/build/Compose/migration/restart evidence |
-| Post-8 | Self-service account creation | Public register page/API integration; no schema change; every new user gets VIEWER | Current frontend registration regression test; current combined suites listed below |
+| Post-8 | Self-service account creation | Public register page/API integration; initially VIEWER, later changed by owner decision so every new user gets ADMIN | Current frontend registration regression test; current combined suites listed below |
 
 Stage files are historical evidence. Statements such as “the next stage has not started,” old ports, or old test counts were true at their recorded time and are not current configuration. This handbook and live source take precedence for current operation.
 
@@ -720,7 +720,7 @@ Stage files are historical evidence. Statements such as “the next stage has no
 | Deferred but evidenced by gaps | Supplier bills/outgoing payments, role mutation, token refresh/recovery/MFA/rate limiting, pagination, distributed cache invalidation, automated retraining, real-data model validation, browser E2E |
 | Future work, not a current promise | Any additional ERP domain such as inventory, payroll, multi-company, tax filing, currencies or bank reconciliation requires explicit design before implementation |
 
-1. Self-registration creates a read-only Viewer, so a new user cannot add an invoice without role assignment.
+1. Self-registration creates a full-access Admin; public exposure lets any registrant manage financial data and other users.
 2. IRANSans is named but not bundled, so typography depends on host fonts/fallbacks.
 3. Supplier bills and supplier payments are absent; payables are liability-ledger exposure only.
 4. Cash flow is posted customer-receipt inflow only; outflows are always zero.
@@ -774,7 +774,7 @@ The preceding sections contain detailed diagrams; this compact index shows ten d
 
 ```mermaid
 flowchart TB
-    F1[1 Register] --> U[(User + VIEWER)]
+    F1[1 Register] --> U[(User + ADMIN)]
     F2[2 Login] --> JWT[JWT/sessionStorage]
     F3[3 API read] --> RBAC[RBAC] --> DB[(PostgreSQL)]
     F4[4 Journal draft] --> POST[Post validation] --> LEDGER[(Posted ledger)]
@@ -816,7 +816,7 @@ In every AI flow the final database write is prediction history, not `journal_en
 9. Never commit `.env`, JWT secrets, database passwords, or generated model artifacts.
 10. Browser-to-backend uses host 8100; container-to-container backend-to-DB uses `db`.
 11. Host 4173/8100 were chosen around real Windows excluded ranges.
-12. Registration grants VIEWER only; UI visibility follows permissions.
+12. Registration grants ADMIN; do not expose it beyond a trusted onboarding boundary.
 13. Backend authorization remains mandatory even when a button is hidden.
 14. All production IDs are UUIDs and dates/timestamps must preserve their semantic timezone/date meaning.
 15. ML training is offline; inference must never silently train.
@@ -929,11 +929,11 @@ sequenceDiagram
 
 برای نمونه، صفحه فاکتور ابتدا مشتری و کالا را می‌گیرد، نبود مشتری فعال را با راهنمای فارسی نشان می‌دهد، ورودی پایه را کنترل و `POST /invoices` را ارسال می‌کند. backend به‌ترتیب JWT، `invoices:write`، schema، فعال‌بودن مشتری/کالا و تاریخ را بررسی، جمع‌ها را با Decimal محاسبه و invoice/items را commit می‌کند. پاسخ ذخیره‌شده باعث بسته‌شدن فرم و reload فهرست می‌شود.
 
-چرخه‌های مهم دیگر نیز روشن‌اند: ورود به بررسی Argon2id و ساخت JWT می‌رسد؛ ثبت‌نام Viewer و audit می‌سازد؛ صدور فاکتور یک سند INV متوازن و ISSUED را اتمیک ایجاد می‌کند؛ دریافت ابتدا DRAFT و بعد از recheck تخصیص‌ها سند PAY و وضعیت مانده فاکتور را ثبت می‌کند؛ سند دستی هنگام post دوره/حساب/تعداد خطوط/توازن را می‌سنجد؛ reverse یک سند جدید با سمت‌های معکوس می‌سازد؛ گزارش فقط می‌خواند؛ و پیش‌بینی فقط `ml_predictions` می‌نویسد. retry عملیات کامل‌شده به‌جای ساخت رکورد تکراری با status/unique constraint رد می‌شود.
+چرخه‌های مهم دیگر نیز روشن‌اند: ورود به بررسی Argon2id و ساخت JWT می‌رسد؛ ثبت‌نام Admin و audit می‌سازد؛ صدور فاکتور یک سند INV متوازن و ISSUED را اتمیک ایجاد می‌کند؛ دریافت ابتدا DRAFT و بعد از recheck تخصیص‌ها سند PAY و وضعیت مانده فاکتور را ثبت می‌کند؛ سند دستی هنگام post دوره/حساب/تعداد خطوط/توازن را می‌سنجد؛ reverse یک سند جدید با سمت‌های معکوس می‌سازد؛ گزارش فقط می‌خواند؛ و پیش‌بینی فقط `ml_predictions` می‌نویسد. retry عملیات کامل‌شده به‌جای ساخت رکورد تکراری با status/unique constraint رد می‌شود.
 
 ## ۴. ثبت‌نام، ورود، JWT و کنترل دسترسی
 
-در ثبت‌نام، حداقل یکی از ایمیل یا شماره تلفن E.164 لازم است و واردکردن هر دو نیز مجاز است. ایمیل trim و case-fold می‌شود، رمز باید بین ۱۲ تا ۱۲۸ نویسه باشد و با Argon2id هش می‌شود. ورود با ایمیل یا شماره تلفن انجام می‌شود. حساب جدید فعال و فقط با نقش `VIEWER` ساخته می‌شود. رابط پس از ثبت‌نام، همان کاربر را وارد می‌کند و توکن را در `sessionStorage` با کلید `azari_token` نگه می‌دارد.
+در ثبت‌نام، حداقل یکی از ایمیل یا شماره تلفن E.164 لازم است و واردکردن هر دو نیز مجاز است. ایمیل trim و case-fold می‌شود، رمز باید بین ۱۲ تا ۱۲۸ نویسه باشد و با Argon2id هش می‌شود. ورود با ایمیل یا شماره تلفن انجام می‌شود. حساب جدید فعال و با نقش کامل `ADMIN` ساخته می‌شود. چون ثبت‌نام عمومی است، این رفتار فقط پشت مرز اعتماد مناسب امن است. رابط پس از ثبت‌نام، همان کاربر را وارد می‌کند و توکن را در `sessionStorage` با کلید `azari_token` نگه می‌دارد.
 
 توکن شامل `sub`، نوع `access`، زمان صدور، انقضا و `jti` است. مدت پیش‌فرض ۳۰ دقیقه و بازه مجاز ۵ تا ۱۴۴۰ دقیقه است. هر درخواست حفاظت‌شده دوباره وجود و فعال‌بودن کاربر را بررسی می‌کند. هویت نامعتبر یا غیرفعال پاسخ ۴۰۱ می‌گیرد؛ کاربر معتبر بدون مجوز پاسخ ۴۰۳. نبود کاربر در ورود نیز یک بررسی هش ساختگی انجام می‌دهد تا تفاوت زمانی، وجود ایمیل را لو ندهد.
 
@@ -956,7 +956,7 @@ sequenceDiagram
 
 `ADMIN` همه مجوزهای seedشده را دارد. چند مجوز مانند `users:create/update/delete` و `ml:train` تعریف شده‌اند ولی مسیر HTTP متناظر ندارند. مخفی‌کردن منو و دکمه برای تجربه کاربر است؛ مرز امنیتی واقعی dependency مجوز در backend است.
 
-**نتیجه مهم برای کاربر:** کسی که از صفحه ثبت‌نام حساب می‌سازد Viewer است. او می‌تواند داده‌های مجاز را ببیند، اما دکمه ایجاد فاکتور ندارد و API نیز اجازه ایجاد نمی‌دهد. برای صدور فاکتور باید نقش ACCOUNTANT یا ADMIN از مسیر مدیریتی خارج از رابط خواندنی فعلی به او اختصاص یابد.
+**نتیجه مهم برای کاربر:** کسی که از صفحه ثبت‌نام حساب می‌سازد Admin است و بلافاصله می‌تواند فاکتور بسازد و همه عملیات برنامه و مدیریت کاربران را انجام دهد. در نتیجه صفحه ثبت‌نام نباید بدون کنترل اعتماد در اینترنت عمومی قرار گیرد.
 
 رویدادهای موفق و ناموفق ثبت‌نام/ورود و چند عملیات مدیریتی/حسابداری ممیزی می‌شوند. جزئیات ممیزی به‌صورت بازگشتی کلیدهای حساس مانند رمز و توکن را رد می‌کند. جدول ممیزی برای الحاق تاریخچه طراحی شده و API ویرایش/حذف ندارد.
 
@@ -1160,13 +1160,13 @@ Image قالب تغییرناپذیر build و container نمونه درحال �
 
 ## ۱۳. تاریخچه مرحله‌ها
 
-۱) زیرساخت Docker، health، ignore و پورت‌های قابل اجرا. ۲) هویت، PostgreSQL، Alembic، RBAC و ممیزی. ۳) دامنه حسابداری و اسناد/فاکتور/دریافت. ۴) گزارش و داشبورد. ۵) چهار pipeline آفلاین ML. ۶) registry، فعال‌سازی، استنتاج و feedback. ۷) frontend تولیدی فارسی. ۸) سخت‌سازی responsive/accessibility/error/test/runtime. پس از مرحله ۸، ثبت‌نام عمومی backend/frontend با نقش Viewer اضافه شد.
+۱) زیرساخت Docker، health، ignore و پورت‌های قابل اجرا. ۲) هویت، PostgreSQL، Alembic، RBAC و ممیزی. ۳) دامنه حسابداری و اسناد/فاکتور/دریافت. ۴) گزارش و داشبورد. ۵) چهار pipeline آفلاین ML. ۶) registry، فعال‌سازی، استنتاج و feedback. ۷) frontend تولیدی فارسی. ۸) سخت‌سازی responsive/accessibility/error/test/runtime. پس از مرحله ۸، ثبت‌نام عمومی backend/frontend ابتدا با نقش Viewer اضافه و سپس طبق تصمیم مالک به Admin تغییر کرد.
 
 گزارش‌های هر مرحله باید به‌عنوان عکس تاریخی خوانده شوند. پورت قدیمی، تعداد آزمون قدیمی یا جمله «مرحله بعد شروع نشده» را نباید بر تنظیم امروز مقدم دانست.
 
 ## ۱۴. محدودیت‌ها و ناسازگاری‌های مهم
 
-1. کاربر ثبت‌نامی Viewer است و بدون تخصیص نقش نمی‌تواند فاکتور بسازد.
+1. کاربر ثبت‌نامی Admin است؛ انتشار عمومی صفحه ثبت‌نام به هر ثبت‌نام‌کننده دسترسی کامل می‌دهد.
 2. IRANSans در سورس نام‌گذاری شده ولی asset آن بسته‌بندی نشده است.
 3. draft فاکتور از مطالبات و dashboard حذف می‌شود؛ تاریخچه «as-of» هنوز بر `issue_date` تکیه دارد و `issued_at` جدا ندارد.
 4. خرید/پرداخت تأمین‌کننده و subledger پرداختنی وجود ندارد.
@@ -1225,7 +1225,7 @@ Image قالب تغییرناپذیر build و container نمونه درحال �
 9. secret، `.env` و artifact تولیدی را commit نکنید.
 10. localhost میزبان با نام سرویس داخل Docker فرق دارد.
 11. پورت‌های 4173/8100 به دلیل رزرو واقعی Windows انتخاب شده‌اند.
-12. ثبت‌نام فقط Viewer می‌سازد.
+12. ثبت‌نام Admin می‌سازد و باید پشت مرز اعتماد مناسب باشد.
 13. کنترل backend حتی با دکمه مخفی الزامی است.
 14. شناسه‌ها UUID و معنای date/time باید حفظ شود.
 15. آموزش ML آفلاین است.
@@ -1273,7 +1273,7 @@ Configuration comparison includes backend settings, offline ML settings, Compose
 
 **Remaining documentation gaps:** there is no generated column-by-column data dictionary or checked-in OpenAPI snapshot, and Mermaid rendering depends on the Markdown viewer. The table descriptions and API inventory cover the current system, but a future schema/route change still requires a same-commit handbook update. Historical stage files intentionally retain old test counts, old boundary statements and recorded failures rather than being rewritten.
 
-**Current documented limitations:** new registrations are Viewer-only, IRANSans is not bundled, historical receivables have no separate issuance timestamp, and historical stage documents contain old ports/test counts/stage-boundary statements. Stage 9 fixed draft reporting, semantic financial account roles, concurrent receipt allocation, historical category/role mutation, zero invoices, tax-liability posting, closed-period reversal rollback, model-artifact integrity, readiness, and related UI/API validation.
+**Current documented limitations:** public registration grants full ADMIN access, IRANSans is not bundled, historical receivables have no separate issuance timestamp, and historical stage documents contain old ports/test counts/stage-boundary statements. Stage 9 fixed draft reporting, semantic financial account roles, concurrent receipt allocation, historical category/role mutation, zero invoices, tax-liability posting, closed-period reversal rollback, model-artifact integrity, readiness, and related UI/API validation.
 
 Verification run on 2026-08-27 against the documented tree:
 
