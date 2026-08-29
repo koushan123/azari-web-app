@@ -13,7 +13,8 @@ export interface Period { id: UUID; name: string; start_date: string; end_date: 
 export interface JournalLine { id?: UUID; account_id: UUID; description: string | null; debit: Money; credit: Money }
 export interface Journal { id: UUID; entry_number: string; entry_date: string; description: string; period_id: UUID; status: string; reversal_of_id: UUID | null; lines: JournalLine[] }
 export interface InvoiceItem { id?: UUID; product_id: UUID | null; description: string; quantity: string; unit_price: Money | null; tax: Money; line_subtotal?: Money; line_total?: Money }
-export interface Invoice { id: UUID; invoice_number: string; customer_id: UUID; issue_date: string; due_date: string; status: string; subtotal: Money; tax: Money; total: Money; amount_paid: Money; balance_due: Money; journal_id: UUID | null; items: InvoiceItem[] }
+export interface InvoiceCheck { id: UUID; amount: Money; sayad_id: string; due_date: string; status: "PENDING" | "CLEARED" | "BOUNCED"; cleared_date: string | null; cleared_payment_id: UUID | null }
+export interface Invoice { id: UUID; invoice_number: string; customer_id: UUID; issue_date: string; due_date: string; status: string; payment_method: "CASH" | "CHECK" | null; subtotal: Money; tax: Money; total: Money; amount_paid: Money; balance_due: Money; journal_id: UUID | null; items: InvoiceItem[]; checks: InvoiceCheck[] }
 export interface Allocation { id?: UUID; invoice_id: UUID; amount: Money }
 export interface Payment { id: UUID; party_id: UUID; payment_date: string; amount: Money; reference: string; method: string; status: string; journal_id: UUID | null; allocations: Allocation[] }
 export interface BillItem { id?: UUID; product_id: UUID | null; description: string; quantity: string; unit_price: Money | null; tax: Money; line_subtotal?: Money; line_total?: Money }

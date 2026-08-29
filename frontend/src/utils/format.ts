@@ -7,7 +7,7 @@ export const formatMoney = (value: string | number | null | undefined) => money.
 export const formatPercent = (value: number | null | undefined) => percents.format(value ?? 0);
 export const toEnglishDigits = digits;
 export const shortId = (value: string) => digits(value.slice(0, 8));
-export const STATUS_LABELS: Record<string, string> = { ACTIVE: "فعال", INACTIVE: "غیرفعال", OPEN: "باز", CLOSED: "بسته", DRAFT: "پیش‌نویس", POSTED: "ثبت‌شده", REVERSED: "برگشت‌خورده", ISSUED: "صادرشده", PARTIALLY_PAID: "پرداخت جزئی", PAID: "پرداخت‌شده", CANCELLED: "لغوشده", OVERDUE: "سررسیدگذشته", HIGH: "بالا", MEDIUM: "متوسط", LOW: "پایین" };
+export const STATUS_LABELS: Record<string, string> = { ACTIVE: "فعال", INACTIVE: "غیرفعال", OPEN: "باز", CLOSED: "بسته", DRAFT: "پیش‌نویس", POSTED: "ثبت‌شده", REVERSED: "برگشت‌خورده", ISSUED: "صادرشده", PARTIALLY_PAID: "پرداخت جزئی", PAID: "پرداخت‌شده", CANCELLED: "لغوشده", OVERDUE: "سررسیدگذشته", PENDING: "در انتظار", CLEARED: "وصول‌شده", BOUNCED: "برگشتی", HIGH: "بالا", MEDIUM: "متوسط", LOW: "پایین" };
 export const statusLabel = (value: string) => STATUS_LABELS[value.toUpperCase()] ?? value;
 export const ACCOUNT_TYPE_LABELS: Record<string, string> = { ASSET: "دارایی", LIABILITY: "بدهی", EQUITY: "حقوق مالکانه", REVENUE: "درآمد", EXPENSE: "هزینه" };
 export const PIPELINE_LABELS: Record<string, string> = { transaction_classification: "طبقه‌بندی تراکنش", payment_delay_risk: "ریسک تأخیر پرداخت", cash_flow_forecast: "پیش‌بینی جریان نقدی", customer_segmentation: "بخش‌بندی مشتریان" };

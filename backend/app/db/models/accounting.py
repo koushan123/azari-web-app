@@ -162,6 +162,10 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "status IN ('DRAFT','ISSUED','PARTIALLY_PAID','PAID','CANCELLED')", name="valid_status"
         ),
+        CheckConstraint(
+            "payment_method IS NULL OR payment_method IN ('CASH','CHECK')",
+            name="valid_payment_method",
+        ),
         Index("ix_invoices_customer_issue_date", "customer_id", "issue_date"),
         Index("ix_invoices_status_due_date", "status", "due_date"),
     )
@@ -171,6 +175,7 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     issue_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="DRAFT", server_default="DRAFT")
+    payment_method: Mapped[str | None] = mapped_column(String(10))
     subtotal: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
     tax: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
     total: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
@@ -180,6 +185,11 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     journal: Mapped[JournalEntry | None] = relationship()
     items: Mapped[list["InvoiceItem"]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan"
+    )
+    checks: Mapped[list["InvoiceCheck"]] = relationship(
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        order_by="InvoiceCheck.due_date, InvoiceCheck.id",
     )
 
     @property
@@ -207,6 +217,37 @@ class InvoiceItem(UUIDPrimaryKeyMixin, Base):
     line_total: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     invoice: Mapped[Invoice] = relationship(back_populates="items")
     product: Mapped[Product | None] = relationship()
+
+
+class InvoiceCheck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "invoice_checks"
+    __table_args__ = (
+        UniqueConstraint("sayad_id", name="uq_invoice_checks_sayad_id"),
+        CheckConstraint("amount > 0", name="positive_amount"),
+        CheckConstraint(
+            "status IN ('PENDING','CLEARED','BOUNCED')", name="valid_status"
+        ),
+        Index("ix_invoice_checks_invoice_id", "invoice_id"),
+        Index("ix_invoice_checks_status_due_date", "status", "due_date"),
+    )
+
+    invoice_id: Mapped[UUID] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE")
+    )
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    sayad_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(12), default="PENDING", server_default="PENDING", nullable=False
+    )
+    cleared_date: Mapped[date | None] = mapped_column(Date)
+    cleared_payment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("payments.id", ondelete="RESTRICT"), unique=True
+    )
+    invoice: Mapped[Invoice] = relationship(back_populates="checks")
+    cleared_payment: Mapped["Payment | None"] = relationship(
+        foreign_keys=[cleared_payment_id]
+    )
 
 
 class Bill(UUIDPrimaryKeyMixin, TimestampMixin, Base):

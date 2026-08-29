@@ -13,6 +13,7 @@ from backend.app.db.models import (
     Invoice,
     JournalEntry,
     Party,
+    Payment,
     Product,
     Role,
     User,
@@ -25,6 +26,8 @@ from backend.app.schemas.accounting import (
     BillPaymentCreate,
     BillPaymentPost,
     CategoryCreate,
+    InvoiceCheckCreate,
+    InvoiceCheckUpdate,
     InvoiceCreate,
     InvoiceIssue,
     JournalCreate,
@@ -404,6 +407,118 @@ def test_zero_value_invoice_is_rejected() -> None:
             service.create_invoice(data)
 
         assert session.scalar(select(Invoice).where(Invoice.invoice_number == "I-1")) is None
+
+
+def test_typed_customer_and_check_details_are_persisted_and_validated() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        data = invoice_data(values)
+        data.customer_id = None
+        data.customer_name = "مشتری جدید"
+        data.payment_method = "CHECK"
+        data.checks = [
+            InvoiceCheckCreate(
+                amount=Decimal("100"),
+                sayad_id="SAYAD-001",
+                due_date=date(2026, 2, 15),
+                status="PENDING",
+            ),
+            InvoiceCheckCreate(
+                amount=Decimal("175"),
+                sayad_id="SAYAD-002",
+                due_date=date(2026, 3, 1),
+                status="BOUNCED",
+            ),
+        ]
+
+        invoice = service.create_invoice(data)
+
+        assert invoice.customer.name == "مشتری جدید"
+        assert invoice.customer.is_customer
+        assert invoice.payment_method == "CHECK"
+        assert [check.sayad_id for check in invoice.checks] == ["SAYAD-001", "SAYAD-002"]
+        assert sum(check.amount for check in invoice.checks) == invoice.total
+
+        invalid = invoice_data(values, "I-BAD-CHECKS")
+        invalid.payment_method = "CHECK"
+        invalid.checks = [
+            InvoiceCheckCreate(
+                amount=Decimal("1"),
+                sayad_id="SAYAD-003",
+                due_date=date(2026, 3, 1),
+            )
+        ]
+        with pytest.raises(AccountingError, match="must equal"):
+            service.create_invoice(invalid)
+
+
+def test_only_cleared_check_posts_payment_and_cleared_check_is_immutable() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        data = invoice_data(values)
+        data.payment_method = "CHECK"
+        data.checks = [
+            InvoiceCheckCreate(
+                amount=Decimal("100"),
+                sayad_id="CLEAR-001",
+                due_date=date(2026, 2, 15),
+            ),
+            InvoiceCheckCreate(
+                amount=Decimal("175"),
+                sayad_id="CLEAR-002",
+                due_date=date(2026, 3, 1),
+            ),
+        ]
+        invoice = service.create_invoice(data)
+        issued = service.issue_invoice(
+            invoice.id,
+            InvoiceIssue(
+                receivable_account_id=values.receivable.id,
+                revenue_account_id=values.revenue.id,
+                tax_liability_account_id=values.tax_liability.id,
+            ),
+        )
+        first, second = issued.checks
+
+        bounced = service.update_invoice_check(
+            first.id, InvoiceCheckUpdate(status="BOUNCED")
+        )
+        assert bounced.status == "BOUNCED"
+        assert issued.amount_paid == Decimal("0")
+        assert len(service.list(Payment)) == 0
+
+        cleared = service.update_invoice_check(
+            first.id,
+            InvoiceCheckUpdate(
+                status="CLEARED",
+                cash_account_id=values.cash.id,
+                cleared_date=date(2026, 2, 20),
+            ),
+        )
+        session.refresh(issued)
+        assert cleared.status == "CLEARED"
+        assert cleared.cleared_payment_id is not None
+        assert issued.amount_paid == Decimal("100.00")
+        assert issued.status == "PARTIALLY_PAID"
+        payment = session.scalars(select(Payment)).one()
+        assert payment.status == "POSTED" and payment.amount == Decimal("100.00")
+
+        with pytest.raises(ConflictError, match="immutable"):
+            service.update_invoice_check(
+                first.id, InvoiceCheckUpdate(status="PENDING")
+            )
+
+        service.update_invoice_check(
+            second.id,
+            InvoiceCheckUpdate(
+                status="CLEARED",
+                cash_account_id=values.cash.id,
+                cleared_date=date(2026, 3, 1),
+            ),
+        )
+        session.refresh(issued)
+        assert issued.amount_paid == issued.total
+        assert issued.status == "PAID"
 
 
 def post_invoice(service: AccountingService, values: Domain, number: str = "I-1") -> Invoice:

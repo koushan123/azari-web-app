@@ -32,6 +32,11 @@ def test_stage_two_tables_and_constraints_exist() -> None:
         item["name"] == "ck_users_contact_method_required"
         for item in inspector.get_check_constraints("users")
     )
+    assert "invoice_checks" in inspector.get_table_names()
+    assert any(
+        item["name"] == "uq_invoice_checks_sayad_id"
+        for item in inspector.get_unique_constraints("invoice_checks")
+    )
 
 
 def test_rbac_bootstrap_is_idempotent() -> None:

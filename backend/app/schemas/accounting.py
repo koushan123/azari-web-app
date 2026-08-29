@@ -172,11 +172,25 @@ class InvoiceItemCreate(BaseModel):
     tax: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
 
 
+class InvoiceCheckCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    sayad_id: str = Field(min_length=1, max_length=32)
+    due_date: date
+    status: str = Field(default="PENDING", pattern="^(PENDING|BOUNCED)$")
+
+
 class InvoiceCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     invoice_number: str = Field(min_length=1, max_length=80)
-    customer_id: UUID
+    customer_id: UUID | None = None
+    customer_name: str | None = Field(default=None, min_length=1, max_length=200)
     issue_date: date
     due_date: date
+    payment_method: str = Field(default="CASH", pattern="^(CASH|CHECK)$")
+    checks: list[InvoiceCheckCreate] = Field(default_factory=list)
     items: list[InvoiceItemCreate] = Field(min_length=1)
 
 
@@ -191,6 +205,16 @@ class InvoiceItemRead(ORMModel):
     line_total: Decimal
 
 
+class InvoiceCheckRead(ORMModel):
+    id: UUID
+    amount: Decimal
+    sayad_id: str
+    due_date: date
+    status: str
+    cleared_date: date | None
+    cleared_payment_id: UUID | None
+
+
 class InvoiceRead(ORMModel):
     id: UUID
     invoice_number: str
@@ -198,12 +222,14 @@ class InvoiceRead(ORMModel):
     issue_date: date
     due_date: date
     status: str
+    payment_method: str | None
     subtotal: Decimal
     tax: Decimal
     total: Decimal
     amount_paid: Decimal
     journal_id: UUID | None
     items: list[InvoiceItemRead]
+    checks: list[InvoiceCheckRead]
 
     balance_due: Decimal
 
@@ -212,6 +238,12 @@ class InvoiceIssue(BaseModel):
     receivable_account_id: UUID
     revenue_account_id: UUID
     tax_liability_account_id: UUID | None = None
+
+
+class InvoiceCheckUpdate(BaseModel):
+    status: str = Field(pattern="^(PENDING|CLEARED|BOUNCED)$")
+    cash_account_id: UUID | None = None
+    cleared_date: date | None = None
 
 
 class AllocationCreate(BaseModel):

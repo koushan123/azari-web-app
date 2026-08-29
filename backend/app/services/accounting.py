@@ -17,6 +17,7 @@ from backend.app.db.models import (
     BillPaymentAllocation,
     FinancialPeriod,
     Invoice,
+    InvoiceCheck,
     InvoiceItem,
     JournalEntry,
     JournalLine,
@@ -36,6 +37,7 @@ from backend.app.schemas.accounting import (
     BillPaymentCreate,
     BillPaymentPost,
     CategoryCreate,
+    InvoiceCheckUpdate,
     InvoiceCreate,
     InvoiceIssue,
     JournalCreate,
@@ -403,9 +405,30 @@ class AccountingService:
         return reversal
 
     def create_invoice(self, data: InvoiceCreate) -> Invoice:
-        customer = self._get(Party, data.customer_id)
-        if not customer.is_customer or not customer.is_active:
-            raise AccountingError("Invoice party must be an active customer")
+        if (data.customer_id is None) == (data.customer_name is None):
+            raise AccountingError("Provide either customer_id or customer_name")
+        if data.customer_id is not None:
+            customer = self._get(Party, data.customer_id)
+            if not customer.is_customer or not customer.is_active:
+                raise AccountingError("Invoice party must be an active customer")
+        else:
+            customer_name = data.customer_name
+            if customer_name is None:  # guarded by the exclusive-or check above
+                raise AccountingError("Customer name is required")
+            existing_customer = self.session.scalar(
+                select(Party).where(
+                    Party.name == customer_name,
+                    Party.is_active.is_(True),
+                )
+            )
+            if existing_customer is None:
+                customer = Party(name=customer_name, is_customer=True, is_supplier=False)
+                self.session.add(customer)
+                self._flush()
+            else:
+                customer = existing_customer
+            if not customer.is_customer:
+                customer.is_customer = True
         if data.issue_date > data.due_date:
             raise AccountingError("Invoice due date cannot precede issue date")
         items: list[InvoiceItem] = []
@@ -438,9 +461,10 @@ class AccountingService:
             )
         invoice = Invoice(
             invoice_number=data.invoice_number,
-            customer_id=data.customer_id,
+            customer_id=customer.id,
             issue_date=data.issue_date,
             due_date=data.due_date,
+            payment_method=data.payment_method,
             subtotal=money(subtotal),
             tax=money(tax_total),
             total=money(subtotal + tax_total),
@@ -448,6 +472,21 @@ class AccountingService:
         )
         if invoice.total == 0:
             raise AccountingError("Invoice total must be greater than zero")
+        if data.payment_method == "CASH" and data.checks:
+            raise AccountingError("Cash invoices cannot contain checks")
+        if data.payment_method == "CHECK":
+            if not data.checks:
+                raise AccountingError("Check invoices require at least one check")
+            if money(sum((check.amount for check in data.checks), Decimal("0"))) != invoice.total:
+                raise AccountingError("Check amounts must equal the invoice total")
+            sayad_ids = [check.sayad_id for check in data.checks]
+            if len(sayad_ids) != len(set(sayad_ids)):
+                raise AccountingError("Each check must have a unique Sayad identifier")
+            if any(check.due_date < data.issue_date for check in data.checks):
+                raise AccountingError("Check due dates cannot precede the invoice issue date")
+            invoice.checks = [
+                InvoiceCheck(**check.model_dump()) for check in data.checks
+            ]
         self.session.add(invoice)
         self._flush()
         self._audit("accounting.invoice.created", invoice)
@@ -653,6 +692,11 @@ class AccountingService:
 
     def post_payment(self, payment_id: UUID, data: PaymentPost) -> Payment:
         payment = self._get_for_update(Payment, payment_id)
+        return self._post_payment(payment, data, commit=True)
+
+    def _post_payment(
+        self, payment: Payment, data: PaymentPost, *, commit: bool
+    ) -> Payment:
         if payment.status != "DRAFT":
             raise ConflictError("Only draft payments can be posted")
         if data.cash_account_id == data.receivable_account_id:
@@ -722,11 +766,68 @@ class AccountingService:
             payment.status = "POSTED"
             payment.journal = journal
             self._audit("accounting.payment.posted", payment)
-            self._commit()
+            if commit:
+                self._commit()
         except Exception:
             self.session.rollback()
             raise
         return payment
+
+    def update_invoice_check(
+        self, check_id: UUID, data: InvoiceCheckUpdate
+    ) -> InvoiceCheck:
+        check = self._get_for_update(InvoiceCheck, check_id)
+        if check.status == "CLEARED":
+            raise ConflictError("Cleared checks are immutable")
+        invoice = self._get_for_update(Invoice, check.invoice_id)
+        if data.status != "CLEARED":
+            if data.cash_account_id is not None or data.cleared_date is not None:
+                raise AccountingError(
+                    "Cash account and cleared date are only valid when clearing a check"
+                )
+            check.status = data.status
+            self._audit("accounting.invoice_check.updated", check)
+            self._commit()
+            return check
+        if invoice.status not in {"ISSUED", "PARTIALLY_PAID"}:
+            raise ConflictError("Only checks for issued unpaid invoices can be cleared")
+        if data.cash_account_id is None or data.cleared_date is None:
+            raise AccountingError("Cash account and cleared date are required")
+        if check.amount > invoice.balance_due:
+            raise AccountingError("Check amount exceeds the current invoice balance")
+        if invoice.journal is None:
+            raise ConflictError("Issued invoice journal is missing")
+        receivable_ids = {
+            line.account_id for line in invoice.journal.lines if line.debit > 0
+        }
+        if len(receivable_ids) != 1:
+            raise ConflictError("Invoice receivable account is ambiguous")
+        receivable_account_id = next(iter(receivable_ids))
+        payment = Payment(
+            party_id=invoice.customer_id,
+            payment_date=data.cleared_date,
+            amount=check.amount,
+            reference=f"CHECK-{check.sayad_id}",
+            method="CHECK",
+            allocations=[PaymentAllocation(invoice_id=invoice.id, amount=check.amount)],
+        )
+        self.session.add(payment)
+        self._flush()
+        self._audit("accounting.payment.created", payment)
+        self._post_payment(
+            payment,
+            PaymentPost(
+                cash_account_id=data.cash_account_id,
+                receivable_account_id=receivable_account_id,
+            ),
+            commit=False,
+        )
+        check.status = "CLEARED"
+        check.cleared_date = data.cleared_date
+        check.cleared_payment_id = payment.id
+        self._audit("accounting.invoice_check.cleared", check)
+        self._commit()
+        return check
 
     def create_bill_payment(self, data: BillPaymentCreate) -> BillPayment:
         party = self._get(Party, data.party_id)

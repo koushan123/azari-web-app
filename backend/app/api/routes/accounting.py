@@ -13,6 +13,7 @@ from backend.app.db.models import (
     BillPayment,
     FinancialPeriod,
     Invoice,
+    InvoiceCheck,
     JournalEntry,
     Party,
     Payment,
@@ -31,6 +32,8 @@ from backend.app.schemas.accounting import (
     BillRead,
     CategoryCreate,
     CategoryRead,
+    InvoiceCheckRead,
+    InvoiceCheckUpdate,
     InvoiceCreate,
     InvoiceIssue,
     InvoiceRead,
@@ -280,6 +283,16 @@ def issue_invoice(
     actor: Annotated[User, Depends(require_permission("invoices:issue"))],
 ) -> Invoice:
     return service(session, actor).issue_invoice(item_id, data)
+
+
+@router.patch("/invoice-checks/{item_id}", response_model=InvoiceCheckRead)
+def update_invoice_check(
+    item_id: UUID,
+    data: InvoiceCheckUpdate,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("payments:post"))],
+) -> InvoiceCheck:
+    return service(session, actor).update_invoice_check(item_id, data)
 
 
 @router.post("/payments", response_model=PaymentRead, status_code=201)
