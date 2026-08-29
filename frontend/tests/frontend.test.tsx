@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import indexHtml from "../index.html?raw";
 import appSource from "../src/App.tsx?raw";
+import adminSource from "../src/pages/AdminPages.tsx?raw";
 import dashboardSource from "../src/pages/DashboardPage.tsx?raw";
 import loginPageSource from "../src/pages/LoginPage.tsx?raw";
 import transactionSource from "../src/pages/TransactionsPages.tsx?raw";
@@ -44,3 +45,4 @@ test("transaction forms explain missing prerequisites and block empty required s
 test("financial posting forms enforce semantic roles and block duplicate submissions", () => { assert.match(transactionSource, /posting_role === "CASH"/); assert.match(transactionSource, /posting_role === "RECEIVABLE"/); assert.match(transactionSource, /posting_role === "REVENUE"/); assert.match(transactionSource, /posting_role === "TAX_LIABILITY"/); assert.match(transactionSource, /tax_liability_account_id/); assert.match(transactionSource, /حساب نقد\/بانک و حساب دریافتنی باید متفاوت باشند/); assert.match(transactionSource, /if \(!item \|\| busy\) return/); assert.match(transactionSource, /در حال صدور…/); assert.match(transactionSource, /در حال ذخیره…/); });
 test("supplier bill forms explain prerequisites and enforce payable roles", () => { assert.match(billSource, /ابتدا باید حداقل یک تأمین‌کننده فعال ثبت کنید/); assert.match(billSource, /ابتدا باید حداقل یک صورتحساب خرید صادرشده با مانده قابل پرداخت داشته باشید/); assert.match(billSource, /posting_role === "EXPENSE"/); assert.match(billSource, /posting_role === "PAYABLE"/); assert.match(billSource, /disabled=\{activeSuppliers.length === 0 \|\| busy\}/); assert.match(billSource, /disabled=\{!prerequisitesReady \|\| busy\}/); assert.match(billSource, /مالیات خرید در مبلغ هزینه جذب می‌شود/); assert.doesNotMatch(billSource, /tax_liability_account_id/); });
 test("dashboard write action is permission-aware", () => { assert.match(dashboardSource, /can\("invoices:write"\) \?/); });
+test("user role and status controls require users manage permission", () => { assert.match(adminSource, /can\("users:manage"\) &&/); assert.match(adminSource, /ویرایش نقش‌ها/); assert.match(adminSource, /غیرفعال‌سازی/); assert.match(adminSource, /<Confirm/); assert.match(adminSource, /حداقل یک مدیر فعال/); });

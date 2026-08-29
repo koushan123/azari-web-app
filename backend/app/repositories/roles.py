@@ -12,3 +12,23 @@ class RoleRepository:
         return self.session.scalar(
             select(Role).where(Role.name == name).options(selectinload(Role.permissions))
         )
+
+    def get_admin_for_update(self) -> Role | None:
+        return self.session.scalar(
+            select(Role)
+            .where(Role.name == "ADMIN")
+            .with_for_update()
+            .execution_options(populate_existing=True)
+            .options(selectinload(Role.permissions))
+        )
+
+    def get_by_names(self, names: set[str]) -> list[Role]:
+        if not names:
+            return []
+        statement = (
+            select(Role)
+            .where(Role.name.in_(names))
+            .options(selectinload(Role.permissions))
+            .order_by(Role.name)
+        )
+        return list(self.session.scalars(statement))

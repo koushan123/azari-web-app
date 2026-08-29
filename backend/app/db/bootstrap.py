@@ -8,6 +8,7 @@ from backend.app.db.models import Permission, Role, User
 
 PERMISSIONS = {
     "users:read": "View users",
+    "users:manage": "Change user roles and activation status",
     "users:create": "Create users",
     "users:update": "Update users",
     "users:delete": "Deactivate or delete users",
