@@ -44,12 +44,22 @@ class AuthenticationService:
             )
             self.session.commit()
             raise DuplicateEmailError("An account with this email already exists")
+        if data.phone_number is not None and self.users.get_by_phone_number(data.phone_number):
+            self.audit.record(
+                action="identity.registration",
+                resource_type="user",
+                success=False,
+                details={"reason": "duplicate_phone_number"},
+            )
+            self.session.commit()
+            raise DuplicateEmailError("An account with this phone number already exists")
 
         default_role = self.roles.get_by_name(PUBLIC_REGISTRATION_ROLE)
         if default_role is None:
             raise RuntimeError("Default registration role has not been bootstrapped")
         user = User(
             email=email,
+            phone_number=data.phone_number,
             password_hash=hash_password(data.password),
             first_name=data.first_name.strip(),
             last_name=data.last_name.strip(),
@@ -68,7 +78,9 @@ class AuthenticationService:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
-            raise DuplicateEmailError("An account with this email already exists") from exc
+            raise DuplicateEmailError(
+                "An account with this email or phone number already exists"
+            ) from exc
         return user
 
     def login(self, data: LoginRequest) -> tuple[User, str]:

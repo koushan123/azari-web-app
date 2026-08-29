@@ -20,6 +20,14 @@ def test_stage_two_tables_and_constraints_exist() -> None:
     assert any(
         item["name"] == "uq_users_email" for item in inspector.get_unique_constraints("users")
     )
+    assert any(
+        item["name"] == "uq_users_phone_number_not_null" and item["unique"]
+        for item in inspector.get_indexes("users")
+    )
+    assert any(
+        item["name"] == "ck_users_valid_plan_status"
+        for item in inspector.get_check_constraints("users")
+    )
 
 
 def test_rbac_bootstrap_is_idempotent() -> None:

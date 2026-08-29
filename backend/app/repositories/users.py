@@ -18,6 +18,14 @@ class UserRepository:
         )
         return self.session.scalar(statement)
 
+    def get_by_phone_number(self, phone_number: str) -> User | None:
+        statement = (
+            select(User)
+            .where(User.phone_number == phone_number)
+            .options(selectinload(User.roles).selectinload(Role.permissions))
+        )
+        return self.session.scalar(statement)
+
     def get_by_id(self, user_id: UUID) -> User | None:
         statement = (
             select(User)

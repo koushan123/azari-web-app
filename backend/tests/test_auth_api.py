@@ -36,6 +36,8 @@ def test_registration_normalizes_email_assigns_viewer_and_hides_password(
     assert response.status_code == 201
     body = response.json()
     assert body["email"] == "alice@example.com"
+    assert body["phone_number"] is None
+    assert body["plan_status"] == "FREE"
     assert body["roles"] == ["VIEWER"]
     assert "password" not in body
     assert "password_hash" not in body
@@ -43,8 +45,49 @@ def test_registration_normalizes_email_assigns_viewer_and_hides_password(
     with SessionLocal() as session:
         user = session.scalar(select(User).where(User.email == "alice@example.com"))
         assert user is not None
+        assert user.phone_number is None
+        assert user.plan_status == "FREE"
         assert user.password_hash != REGISTER_PAYLOAD["password"]
         assert REGISTER_PAYLOAD["password"] not in user.password_hash
+
+
+def test_registration_persists_optional_phone_number_and_free_plan(
+    client: TestClient,
+) -> None:
+    response = register(client, phone_number="+989121234567")
+    assert response.status_code == 201
+    assert response.json()["phone_number"] == "+989121234567"
+    assert response.json()["plan_status"] == "FREE"
+
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.email == "alice@example.com"))
+        assert user is not None
+        assert user.phone_number == "+989121234567"
+        assert user.plan_status == "FREE"
+
+
+def test_registration_rejects_malformed_phone_number(client: TestClient) -> None:
+    for malformed in ("09121234567", "+98 9121234567", "+01234567", "+123"):
+        assert register(client, phone_number=malformed).status_code == 422
+
+
+def test_duplicate_phone_number_is_rejected_without_creating_second_user(
+    client: TestClient,
+) -> None:
+    assert register(client, phone_number="+989121234567").status_code == 201
+    duplicate = register(
+        client,
+        email="second@example.com",
+        phone_number="+989121234567",
+    )
+    assert duplicate.status_code == 409
+
+    with SessionLocal() as session:
+        users = session.scalars(
+            select(User).where(User.phone_number == "+989121234567")
+        ).all()
+        assert len(users) == 1
+        assert users[0].email == "alice@example.com"
 
 
 def test_public_registration_rejects_role_injection_and_invalid_password(

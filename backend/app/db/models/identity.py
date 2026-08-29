@@ -1,7 +1,19 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Table, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Table,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -31,14 +43,28 @@ role_permissions = Table(
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        CheckConstraint("plan_status IN ('FREE','PRO')", name="valid_plan_status"),
+        Index(
+            "uq_users_phone_number_not_null",
+            "phone_number",
+            unique=True,
+            postgresql_where=text("phone_number IS NOT NULL"),
+            sqlite_where=text("phone_number IS NOT NULL"),
+        ),
+    )
 
     email: Mapped[str] = mapped_column(String(320), index=True, nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true", nullable=False
+    )
+    plan_status: Mapped[str] = mapped_column(
+        String(20), default="FREE", server_default="FREE", nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
