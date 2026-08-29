@@ -8,6 +8,7 @@ from backend.app.db.models import (
     Account,
     AccountCategory,
     AuditEvent,
+    Bill,
     FinancialPeriod,
     Invoice,
     JournalEntry,
@@ -19,6 +20,10 @@ from backend.app.db.models import (
 from backend.app.schemas.accounting import (
     AccountCreate,
     AccountUpdate,
+    BillCreate,
+    BillIssue,
+    BillPaymentCreate,
+    BillPaymentPost,
     CategoryCreate,
     InvoiceCreate,
     InvoiceIssue,
@@ -50,8 +55,11 @@ class Domain:
     receivable: Account
     revenue: Account
     tax_liability: Account
+    payable: Account
+    expense: Account
     period: FinancialPeriod
     customer: Party
+    supplier: Party
     product: Product
 
 
@@ -66,7 +74,8 @@ def domain(session: Session) -> tuple[AccountingService, Domain]:
     asset = AccountCategory(name="Assets", account_type="ASSET")
     revenue_category = AccountCategory(name="Revenue", account_type="REVENUE")
     liability = AccountCategory(name="Liabilities", account_type="LIABILITY")
-    session.add_all([admin, asset, revenue_category, liability])
+    expense_category = AccountCategory(name="Purchase expenses", account_type="EXPENSE")
+    session.add_all([admin, asset, revenue_category, liability, expense_category])
     session.flush()
     cash = Account(code="1000", name="Cash", category=asset, posting_role="CASH")
     receivable = Account(
@@ -78,13 +87,41 @@ def domain(session: Session) -> tuple[AccountingService, Domain]:
     tax_liability = Account(
         code="2100", name="Tax payable", category=liability, posting_role="TAX_LIABILITY"
     )
+    payable = Account(code="2000", name="Payable", category=liability, posting_role="PAYABLE")
+    expense = Account(
+        code="5050", name="Purchases", category=expense_category, posting_role="EXPENSE"
+    )
     period = FinancialPeriod(name="2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31))
     customer = Party(name="Customer", is_customer=True)
+    supplier = Party(name="Supplier", is_supplier=True)
     product = Product(sku="P-1", name="Service", unit="hour", unit_price=Decimal("100.00"))
-    session.add_all([cash, receivable, revenue, tax_liability, period, customer, product])
+    session.add_all(
+        [
+            cash,
+            receivable,
+            revenue,
+            tax_liability,
+            payable,
+            expense,
+            period,
+            customer,
+            supplier,
+            product,
+        ]
+    )
     session.commit()
     return AccountingService(session, admin), Domain(
-        admin, cash, receivable, revenue, tax_liability, period, customer, product
+        admin,
+        cash,
+        receivable,
+        revenue,
+        tax_liability,
+        payable,
+        expense,
+        period,
+        customer,
+        supplier,
+        product,
     )
 
 
@@ -394,6 +431,47 @@ def payment_data(
     )
 
 
+def bill_data(values: Domain, number: str = "B-1") -> BillCreate:
+    return BillCreate(
+        bill_number=number,
+        supplier_id=values.supplier.id,
+        issue_date=date(2026, 2, 1),
+        due_date=date(2026, 3, 1),
+        items=[
+            {
+                "product_id": values.product.id,
+                "description": "Purchased service",
+                "quantity": Decimal("2.5"),
+                "tax": Decimal("25"),
+            }
+        ],
+    )
+
+
+def post_bill(service: AccountingService, values: Domain, number: str = "B-1") -> Bill:
+    bill = service.create_bill(bill_data(values, number))
+    return service.issue_bill(
+        bill.id,
+        BillIssue(
+            expense_account_id=values.expense.id,
+            payable_account_id=values.payable.id,
+        ),
+    )
+
+
+def bill_payment_data(
+    values: Domain, bill: Bill, amount: Decimal, reference: str
+) -> BillPaymentCreate:
+    return BillPaymentCreate(
+        party_id=values.supplier.id,
+        payment_date=date(2026, 2, 5),
+        amount=amount,
+        reference=reference,
+        method="bank",
+        allocations=[{"bill_id": bill.id, "amount": amount}],
+    )
+
+
 def test_partial_and_full_payments_post_through_same_ledger() -> None:
     with SessionLocal() as session:
         service, values = domain(session)
@@ -557,6 +635,196 @@ def test_failed_payment_post_rolls_back_journal_invoice_and_payment() -> None:
         assert payment.status == "DRAFT" and payment.journal_id is None
         assert invoice.amount_paid == 0 and invoice.status == "ISSUED"
         assert len(session.scalars(select(JournalEntry)).all()) == before
+
+
+def test_taxed_bill_issues_full_total_to_expense_and_payable() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        bill = service.create_bill(bill_data(values))
+
+        assert bill.status == "DRAFT"
+        assert bill.subtotal == Decimal("250.00")
+        assert bill.tax == Decimal("25.00")
+        assert bill.total == Decimal("275.00")
+        issued = service.issue_bill(
+            bill.id,
+            BillIssue(
+                expense_account_id=values.expense.id,
+                payable_account_id=values.payable.id,
+            ),
+        )
+
+        assert issued.status == "ISSUED"
+        assert issued.journal is not None and len(issued.journal.lines) == 2
+        debits = {line.account_id: line.debit for line in issued.journal.lines if line.debit > 0}
+        credits = {
+            line.account_id: line.credit for line in issued.journal.lines if line.credit > 0
+        }
+        assert debits == {values.expense.id: Decimal("275.00")}
+        assert credits == {values.payable.id: Decimal("275.00")}
+        assert values.tax_liability.id not in debits | credits
+        with pytest.raises(ConflictError, match="Source-document"):
+            service.reverse_journal(issued.journal.id)
+
+
+def test_bill_issue_rejects_zero_closed_period_and_wrong_or_duplicate_roles() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        zero = bill_data(values, "B-ZERO")
+        zero.items[0].unit_price = Decimal("0")
+        zero.items[0].tax = Decimal("0")
+        with pytest.raises(AccountingError, match="greater than zero"):
+            service.create_bill(zero)
+
+        bill = service.create_bill(bill_data(values, "B-ROLE"))
+        generic_expense = Account(
+            code="5099", name="Generic expense", category=values.expense.category
+        )
+        generic_liability = Account(
+            code="2199", name="Generic liability", category=values.payable.category
+        )
+        session.add_all([generic_expense, generic_liability])
+        session.commit()
+        with pytest.raises(AccountingError, match="different"):
+            service.issue_bill(
+                bill.id,
+                BillIssue(
+                    expense_account_id=values.payable.id,
+                    payable_account_id=values.payable.id,
+                ),
+            )
+        with pytest.raises(AccountingError, match="posting role EXPENSE"):
+            service.issue_bill(
+                bill.id,
+                BillIssue(
+                    expense_account_id=generic_expense.id,
+                    payable_account_id=values.payable.id,
+                ),
+            )
+        with pytest.raises(AccountingError, match="posting role PAYABLE"):
+            service.issue_bill(
+                bill.id,
+                BillIssue(
+                    expense_account_id=values.expense.id,
+                    payable_account_id=generic_liability.id,
+                ),
+            )
+
+        values.period.status = "CLOSED"
+        session.commit()
+        with pytest.raises(ConflictError, match="closed period"):
+            service.issue_bill(
+                bill.id,
+                BillIssue(
+                    expense_account_id=values.expense.id,
+                    payable_account_id=values.payable.id,
+                ),
+            )
+        session.refresh(bill)
+        assert bill.status == "DRAFT" and bill.journal_id is None
+
+
+def test_partial_and_full_bill_payments_reduce_payable_and_are_not_reversible() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        bill = post_bill(service, values)
+        first = service.create_bill_payment(
+            bill_payment_data(values, bill, Decimal("100"), "BP-1")
+        )
+        service.post_bill_payment(
+            first.id,
+            BillPaymentPost(
+                cash_account_id=values.cash.id,
+                payable_account_id=values.payable.id,
+            ),
+        )
+        assert bill.amount_paid == Decimal("100.00")
+        assert bill.status == "PARTIALLY_PAID"
+
+        second = service.create_bill_payment(
+            bill_payment_data(values, bill, Decimal("175"), "BP-2")
+        )
+        service.post_bill_payment(
+            second.id,
+            BillPaymentPost(
+                cash_account_id=values.cash.id,
+                payable_account_id=values.payable.id,
+            ),
+        )
+        assert bill.balance_due == 0 and bill.status == "PAID"
+        assert second.journal is not None
+        debits = {line.account_id: line.debit for line in second.journal.lines if line.debit > 0}
+        credits = {
+            line.account_id: line.credit for line in second.journal.lines if line.credit > 0
+        }
+        assert debits == {values.payable.id: Decimal("175.00")}
+        assert credits == {values.cash.id: Decimal("175.00")}
+        with pytest.raises(ConflictError, match="Source-document"):
+            service.reverse_journal(second.journal.id)
+
+
+def test_bill_payment_rejects_overallocation_invalid_sum_and_wrong_payable() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        bill = post_bill(service, values)
+        with pytest.raises(AccountingError, match="balance"):
+            service.create_bill_payment(
+                bill_payment_data(values, bill, Decimal("300"), "BP-OVER")
+            )
+        invalid = bill_payment_data(values, bill, Decimal("100"), "BP-SUM")
+        invalid.allocations[0].amount = Decimal("50")
+        with pytest.raises(AccountingError, match="equal"):
+            service.create_bill_payment(invalid)
+
+        payment = service.create_bill_payment(
+            bill_payment_data(values, bill, Decimal("100"), "BP-WRONG")
+        )
+        other_payable = Account(
+            code="2099",
+            name="Other payable",
+            category=values.payable.category,
+            posting_role="PAYABLE",
+        )
+        session.add(other_payable)
+        session.commit()
+        with pytest.raises(AccountingError, match="match the bill"):
+            service.post_bill_payment(
+                payment.id,
+                BillPaymentPost(
+                    cash_account_id=values.cash.id,
+                    payable_account_id=other_payable.id,
+                ),
+            )
+
+
+def test_bill_payment_post_locks_payment_and_bill_rows_before_allocation() -> None:
+    locked_selects = 0
+
+    def count_locks(*args: object) -> None:
+        nonlocal locked_selects
+        clause = args[1]
+        if getattr(clause, "_for_update_arg", None) is not None:
+            locked_selects += 1
+
+    event.listen(engine, "before_execute", count_locks)
+    try:
+        with SessionLocal() as session:
+            service, values = domain(session)
+            bill = post_bill(service, values)
+            payment = service.create_bill_payment(
+                bill_payment_data(values, bill, Decimal("100"), "BP-LOCK")
+            )
+            service.post_bill_payment(
+                payment.id,
+                BillPaymentPost(
+                    cash_account_id=values.cash.id,
+                    payable_account_id=values.payable.id,
+                ),
+            )
+    finally:
+        event.remove(engine, "before_execute", count_locks)
+
+    assert locked_selects >= 2
 
 
 def test_audits_cover_accounting_mutations_without_secrets() -> None:

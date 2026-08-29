@@ -18,6 +18,7 @@ from backend.app.schemas.reporting import (
     PartyHistoryReport,
     PartyTransaction,
     PayableExposureReport,
+    PayableLine,
     ReceivableLine,
     ReceivablesReport,
     TrialBalanceReport,
@@ -172,32 +173,60 @@ class ReportingService:
         )
 
     def payables(self, as_of: date) -> PayableExposureReport:
-        lines = self._activity(None, as_of, {"LIABILITY"})
+        lines: list[PayableLine] = []
+        for bill, paid in self.repo.payables_as_of(as_of=as_of):
+            balance = money(bill.total - paid)
+            overdue_days = max((as_of - bill.due_date).days, 0)
+            status = "OVERDUE" if overdue_days else "PARTIALLY_PAID" if paid else "ISSUED"
+            lines.append(
+                PayableLine(
+                    bill_id=bill.id,
+                    bill_number=bill.bill_number,
+                    supplier_id=bill.supplier_id,
+                    supplier_name=bill.supplier.name,
+                    issue_date=bill.issue_date,
+                    due_date=bill.due_date,
+                    status=status,
+                    total=bill.total,
+                    amount_paid=money(paid),
+                    balance_due=balance,
+                    days_overdue=overdue_days,
+                )
+            )
         return PayableExposureReport(
             as_of=as_of,
             lines=lines,
-            total_payables=money(sum((line.balance for line in lines), ZERO)),
+            total_payables=money(sum((line.balance_due for line in lines), ZERO)),
         )
 
     def cash_flow(
         self, start_date: date | None = None, end_date: date | None = None
     ) -> CashFlowReport:
         self._validate_range(start_date, end_date)
-        daily: dict[date, Decimal] = defaultdict(lambda: ZERO)
-        for payment in self.repo.posted_payments(start_date, end_date):
-            daily[payment.payment_date] += payment.amount
+        inflows: dict[date, Decimal] = defaultdict(lambda: ZERO)
+        outflows: dict[date, Decimal] = defaultdict(lambda: ZERO)
+        for receipt in self.repo.posted_payments(start_date, end_date):
+            inflows[receipt.payment_date] += receipt.amount
+        for disbursement in self.repo.posted_bill_payments(start_date, end_date):
+            outflows[disbursement.payment_date] += disbursement.amount
         points = [
-            CashFlowPoint(date=value, inflow=money(amount), outflow=ZERO, net=money(amount))
-            for value, amount in sorted(daily.items())
+            CashFlowPoint(
+                date=value,
+                inflow=money(inflows[value]),
+                outflow=money(outflows[value]),
+                net=money(inflows[value] - outflows[value]),
+            )
+            for value in sorted(inflows.keys() | outflows.keys())
         ]
         total_inflow = money(sum((point.inflow for point in points), ZERO))
+        total_outflow = money(sum((point.outflow for point in points), ZERO))
         return CashFlowReport(
             start_date=start_date,
             end_date=end_date,
             points=points,
             total_inflow=total_inflow,
-            total_outflow=ZERO,
-            net_cash_flow=total_inflow,
+            total_outflow=total_outflow,
+            net_cash_flow=money(total_inflow - total_outflow),
         )
 
     def party_history(

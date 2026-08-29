@@ -91,7 +91,7 @@ class AccountCreate(BaseModel):
     parent_id: UUID | None = None
     posting_role: str = Field(
         default="GENERAL",
-        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY)$",
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE)$",
     )
 
 
@@ -102,7 +102,7 @@ class AccountUpdate(BaseModel):
     is_active: bool | None = None
     posting_role: str | None = Field(
         default=None,
-        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY)$",
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE)$",
     )
 
 
@@ -249,3 +249,88 @@ class PaymentRead(ORMModel):
 class PaymentPost(BaseModel):
     cash_account_id: UUID
     receivable_account_id: UUID
+
+
+class BillItemCreate(BaseModel):
+    product_id: UUID | None = None
+    description: str = Field(min_length=1, max_length=500)
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    tax: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
+
+
+class BillCreate(BaseModel):
+    bill_number: str = Field(min_length=1, max_length=80)
+    supplier_id: UUID
+    issue_date: date
+    due_date: date
+    items: list[BillItemCreate] = Field(min_length=1)
+
+
+class BillItemRead(ORMModel):
+    id: UUID
+    product_id: UUID | None
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    tax: Decimal
+    line_subtotal: Decimal
+    line_total: Decimal
+
+
+class BillRead(ORMModel):
+    id: UUID
+    bill_number: str
+    supplier_id: UUID
+    issue_date: date
+    due_date: date
+    status: str
+    subtotal: Decimal
+    tax: Decimal
+    total: Decimal
+    amount_paid: Decimal
+    journal_id: UUID | None
+    items: list[BillItemRead]
+    balance_due: Decimal
+
+
+class BillIssue(BaseModel):
+    expense_account_id: UUID
+    payable_account_id: UUID
+
+
+class BillPaymentAllocationCreate(BaseModel):
+    bill_id: UUID
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+
+
+class BillPaymentCreate(BaseModel):
+    party_id: UUID
+    payment_date: date
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    reference: str = Field(min_length=1, max_length=100)
+    method: str = Field(min_length=1, max_length=50)
+    allocations: list[BillPaymentAllocationCreate] = Field(min_length=1)
+
+
+class BillPaymentAllocationRead(ORMModel):
+    id: UUID
+    bill_id: UUID
+    amount: Decimal
+
+
+class BillPaymentRead(ORMModel):
+    id: UUID
+    party_id: UUID
+    payment_date: date
+    amount: Decimal
+    reference: str
+    method: str
+    status: str
+    journal_id: UUID | None
+    allocations: list[BillPaymentAllocationRead]
+
+
+class BillPaymentPost(BaseModel):
+    cash_account_id: UUID
+    payable_account_id: UUID

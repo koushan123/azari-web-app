@@ -9,6 +9,8 @@ from backend.app.db.database import get_db
 from backend.app.db.models import (
     Account,
     AccountCategory,
+    Bill,
+    BillPayment,
     FinancialPeriod,
     Invoice,
     JournalEntry,
@@ -21,6 +23,12 @@ from backend.app.schemas.accounting import (
     AccountCreate,
     AccountRead,
     AccountUpdate,
+    BillCreate,
+    BillIssue,
+    BillPaymentCreate,
+    BillPaymentPost,
+    BillPaymentRead,
+    BillRead,
     CategoryCreate,
     CategoryRead,
     InvoiceCreate,
@@ -307,3 +315,75 @@ def post_payment(
     actor: Annotated[User, Depends(require_permission("payments:post"))],
 ) -> Payment:
     return service(session, actor).post_payment(item_id, data)
+
+
+@router.post("/bills", response_model=BillRead, status_code=201)
+def create_bill(
+    data: BillCreate,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bills:write"))],
+) -> Bill:
+    return service(session, actor).create_bill(data)
+
+
+@router.get("/bills", response_model=list[BillRead])
+def list_bills(
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bills:read"))],
+) -> list[object]:
+    return service(session, actor).list(Bill)
+
+
+@router.get("/bills/{item_id}", response_model=BillRead)
+def get_bill(
+    item_id: UUID,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bills:read"))],
+) -> object:
+    return service(session, actor).get(Bill, item_id)
+
+
+@router.post("/bills/{item_id}/issue", response_model=BillRead)
+def issue_bill(
+    item_id: UUID,
+    data: BillIssue,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bills:issue"))],
+) -> Bill:
+    return service(session, actor).issue_bill(item_id, data)
+
+
+@router.post("/bill-payments", response_model=BillPaymentRead, status_code=201)
+def create_bill_payment(
+    data: BillPaymentCreate,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bill_payments:write"))],
+) -> BillPayment:
+    return service(session, actor).create_bill_payment(data)
+
+
+@router.get("/bill-payments", response_model=list[BillPaymentRead])
+def list_bill_payments(
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bill_payments:read"))],
+) -> list[object]:
+    return service(session, actor).list(BillPayment)
+
+
+@router.get("/bill-payments/{item_id}", response_model=BillPaymentRead)
+def get_bill_payment(
+    item_id: UUID,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bill_payments:read"))],
+) -> object:
+    return service(session, actor).get(BillPayment, item_id)
+
+
+@router.post("/bill-payments/{item_id}/post", response_model=BillPaymentRead)
+def post_bill_payment(
+    item_id: UUID,
+    data: BillPaymentPost,
+    session: SessionDep,
+    actor: Annotated[User, Depends(require_permission("bill_payments:post"))],
+) -> BillPayment:
+    return service(session, actor).post_bill_payment(item_id, data)

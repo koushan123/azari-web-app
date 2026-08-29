@@ -7,6 +7,7 @@ from backend.app.db.database import SessionLocal
 from backend.app.db.models import (
     Account,
     AccountCategory,
+    Bill,
     FinancialPeriod,
     Invoice,
     Party,
@@ -15,6 +16,10 @@ from backend.app.db.models import (
     User,
 )
 from backend.app.schemas.accounting import (
+    BillCreate,
+    BillIssue,
+    BillPaymentCreate,
+    BillPaymentPost,
     InvoiceCreate,
     InvoiceIssue,
     JournalCreate,
@@ -31,7 +36,9 @@ from sqlalchemy.orm import Session
 class ReportDomain:
     actor: User
     party: Party
+    supplier: Party
     invoice: Invoice
+    bill: Bill
     cash: Account
     receivable: Account
     payable: Account
@@ -91,7 +98,12 @@ def report_domain(session: Session) -> ReportDomain:
         category=categories["ASSET"],
         posting_role="RECEIVABLE",
     )
-    payable = Account(code="R-200", name="Payable", category=categories["LIABILITY"])
+    payable = Account(
+        code="R-200",
+        name="Payable",
+        category=categories["LIABILITY"],
+        posting_role="PAYABLE",
+    )
     equity = Account(code="R-300", name="Capital", category=categories["EQUITY"])
     revenue = Account(
         code="R-400",
@@ -99,13 +111,32 @@ def report_domain(session: Session) -> ReportDomain:
         category=categories["REVENUE"],
         posting_role="REVENUE",
     )
-    expense = Account(code="R-500", name="Expense", category=categories["EXPENSE"])
+    expense = Account(
+        code="R-500",
+        name="Expense",
+        category=categories["EXPENSE"],
+        posting_role="EXPENSE",
+    )
     period = FinancialPeriod(
         name="Report 2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31)
     )
     party = Party(name="Report Customer", is_customer=True)
+    supplier = Party(name="Report Supplier", is_supplier=True)
     product = Product(sku="R-P", name="Reporting", unit_price=Decimal("100"))
-    session.add_all([cash, receivable, payable, equity, revenue, expense, period, party, product])
+    session.add_all(
+        [
+            cash,
+            receivable,
+            payable,
+            equity,
+            revenue,
+            expense,
+            period,
+            party,
+            supplier,
+            product,
+        ]
+    )
     session.commit()
     accounting = AccountingService(session, actor)
     add_journal(accounting, period, "R-CAPITAL", date(2026, 1, 1), cash, equity, Decimal("1000"))
@@ -129,7 +160,25 @@ def report_domain(session: Session) -> ReportDomain:
         InvoiceIssue(receivable_account_id=receivable.id, revenue_account_id=revenue.id),
     )
     add_journal(accounting, period, "R-EXPENSE", date(2026, 2, 5), expense, cash, Decimal("80"))
-    add_journal(accounting, period, "R-PAYABLE", date(2026, 2, 6), expense, payable, Decimal("50"))
+    bill = accounting.create_bill(
+        BillCreate(
+            bill_number="R-B-1",
+            supplier_id=supplier.id,
+            issue_date=date(2026, 2, 6),
+            due_date=date(2026, 2, 15),
+            items=[
+                {
+                    "description": "Supplier expense",
+                    "quantity": Decimal("1"),
+                    "unit_price": Decimal("50"),
+                }
+            ],
+        )
+    )
+    accounting.issue_bill(
+        bill.id,
+        BillIssue(expense_account_id=expense.id, payable_account_id=payable.id),
+    )
     add_journal(
         accounting,
         period,
@@ -154,7 +203,33 @@ def report_domain(session: Session) -> ReportDomain:
         payment.id,
         PaymentPost(cash_account_id=cash.id, receivable_account_id=receivable.id),
     )
-    return ReportDomain(actor, party, invoice, cash, receivable, payable, equity, revenue, expense)
+    bill_payment = accounting.create_bill_payment(
+        BillPaymentCreate(
+            party_id=supplier.id,
+            payment_date=date(2026, 2, 20),
+            amount=Decimal("20"),
+            reference="R-BPAY-1",
+            method="bank",
+            allocations=[{"bill_id": bill.id, "amount": Decimal("20")}],
+        )
+    )
+    accounting.post_bill_payment(
+        bill_payment.id,
+        BillPaymentPost(cash_account_id=cash.id, payable_account_id=payable.id),
+    )
+    return ReportDomain(
+        actor,
+        party,
+        supplier,
+        invoice,
+        bill,
+        cash,
+        receivable,
+        payable,
+        equity,
+        revenue,
+        expense,
+    )
 
 
 def test_financial_statements_use_only_posted_balanced_activity() -> None:
@@ -173,8 +248,8 @@ def test_financial_statements_use_only_posted_balanced_activity() -> None:
         assert reports.account_summary("REVENUE").total == Decimal("300.00")
         assert reports.account_summary("EXPENSE").total == Decimal("130.00")
         balance = reports.balance_sheet(date(2026, 2, 28))
-        assert balance.total_assets == Decimal("1220.00")
-        assert balance.total_liabilities == Decimal("50.00")
+        assert balance.total_assets == Decimal("1200.00")
+        assert balance.total_liabilities == Decimal("30.00")
         assert balance.total_equity == Decimal("1000.00")
         assert balance.current_earnings == Decimal("170.00")
         assert balance.balanced
@@ -190,11 +265,17 @@ def test_receivables_historical_as_of_filter_payables_cash_and_dashboard() -> No
         after_payment = reports.receivables(date(2026, 2, 28))
         assert after_payment.total_outstanding == Decimal("200.00")
         assert after_payment.lines[0].status == "OVERDUE"
+        before_bill_payment = reports.payables(date(2026, 2, 16))
+        assert before_bill_payment.total_payables == Decimal("50.00")
         payables = reports.payables(date(2026, 2, 28))
-        assert payables.total_payables == Decimal("50.00")
-        assert not payables.supplier_detail_available
+        assert payables.total_payables == Decimal("30.00")
+        assert payables.lines[0].supplier_id == values.supplier.id
+        assert payables.lines[0].amount_paid == Decimal("20.00")
+        assert payables.supplier_detail_available
         cash = reports.cash_flow(date(2026, 2, 1), date(2026, 2, 28))
-        assert cash.total_inflow == Decimal("100.00") and cash.net_cash_flow == Decimal("100.00")
+        assert cash.total_inflow == Decimal("100.00")
+        assert cash.total_outflow == Decimal("20.00")
+        assert cash.net_cash_flow == Decimal("80.00")
         dashboard = reports.dashboard(
             as_of=date(2026, 2, 28), start_date=date(2026, 2, 1), end_date=date(2026, 2, 28)
         )

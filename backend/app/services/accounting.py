@@ -11,6 +11,10 @@ from backend.app.db.base import Base
 from backend.app.db.models import (
     Account,
     AccountCategory,
+    Bill,
+    BillItem,
+    BillPayment,
+    BillPaymentAllocation,
     FinancialPeriod,
     Invoice,
     InvoiceItem,
@@ -27,6 +31,10 @@ from backend.app.repositories.audit import AuditRepository
 from backend.app.schemas.accounting import (
     AccountCreate,
     AccountUpdate,
+    BillCreate,
+    BillIssue,
+    BillPaymentCreate,
+    BillPaymentPost,
     CategoryCreate,
     InvoiceCreate,
     InvoiceIssue,
@@ -118,6 +126,8 @@ class AccountingService:
             "RECEIVABLE": "ASSET",
             "REVENUE": "REVENUE",
             "TAX_LIABILITY": "LIABILITY",
+            "PAYABLE": "LIABILITY",
+            "EXPENSE": "EXPENSE",
         }
         required_type = required_types.get(posting_role)
         if required_type is not None and category.account_type != required_type:
@@ -355,7 +365,14 @@ class AccountingService:
         payment_source = self.session.scalar(
             select(Payment.id).where(Payment.journal_id == original.id)
         )
-        if invoice_source is not None or payment_source is not None:
+        bill_source = self.session.scalar(select(Bill.id).where(Bill.journal_id == original.id))
+        bill_payment_source = self.session.scalar(
+            select(BillPayment.id).where(BillPayment.journal_id == original.id)
+        )
+        if any(
+            source is not None
+            for source in (invoice_source, payment_source, bill_source, bill_payment_source)
+        ):
             raise ConflictError("Source-document journals cannot be reversed directly")
         reversal = JournalEntry(
             entry_number=f"REV-{original.entry_number}",
@@ -511,6 +528,99 @@ class AccountingService:
             raise AccountingError("No financial period contains this date")
         return period
 
+    def create_bill(self, data: BillCreate) -> Bill:
+        supplier = self._get(Party, data.supplier_id)
+        if not supplier.is_supplier or not supplier.is_active:
+            raise AccountingError("Bill party must be an active supplier")
+        if data.issue_date > data.due_date:
+            raise AccountingError("Bill due date cannot precede issue date")
+        items: list[BillItem] = []
+        subtotal = Decimal("0")
+        tax_total = Decimal("0")
+        for value in data.items:
+            product = self._get(Product, value.product_id) if value.product_id else None
+            if product is not None and not product.is_active:
+                raise AccountingError("Inactive products cannot be billed")
+            unit_price = (
+                value.unit_price
+                if value.unit_price is not None
+                else product.unit_price
+                if product
+                else None
+            )
+            if unit_price is None:
+                raise AccountingError("Unit price is required without a product")
+            line_subtotal = money(value.quantity * unit_price)
+            line_total = money(line_subtotal + value.tax)
+            subtotal += line_subtotal
+            tax_total += value.tax
+            items.append(
+                BillItem(
+                    **value.model_dump(exclude={"unit_price"}),
+                    unit_price=unit_price,
+                    line_subtotal=line_subtotal,
+                    line_total=line_total,
+                )
+            )
+        bill = Bill(
+            bill_number=data.bill_number,
+            supplier_id=data.supplier_id,
+            issue_date=data.issue_date,
+            due_date=data.due_date,
+            subtotal=money(subtotal),
+            tax=money(tax_total),
+            total=money(subtotal + tax_total),
+            items=items,
+        )
+        if bill.total == 0:
+            raise AccountingError("Bill total must be greater than zero")
+        self.session.add(bill)
+        self._flush()
+        self._audit("accounting.bill.created", bill)
+        self._commit()
+        return bill
+
+    def issue_bill(self, bill_id: UUID, data: BillIssue) -> Bill:
+        bill = self._get(Bill, bill_id)
+        if bill.status != "DRAFT":
+            raise ConflictError("Only draft bills can be issued")
+        if data.expense_account_id == data.payable_account_id:
+            raise AccountingError("Bill posting accounts must be different")
+        self._posting_account(data.expense_account_id, "EXPENSE", "EXPENSE", "Expense")
+        self._posting_account(data.payable_account_id, "LIABILITY", "PAYABLE", "Payable")
+        period = self._period_for(bill.issue_date)
+        journal = self.create_journal(
+            JournalCreate(
+                entry_number=f"BILL-{bill.bill_number}",
+                entry_date=bill.issue_date,
+                description=f"Bill {bill.bill_number}",
+                period_id=period.id,
+                lines=[
+                    {
+                        "account_id": data.expense_account_id,
+                        "debit": bill.total,
+                        "credit": 0,
+                    },
+                    {
+                        "account_id": data.payable_account_id,
+                        "debit": 0,
+                        "credit": bill.total,
+                    },
+                ],
+            ),
+            commit=False,
+        )
+        try:
+            self._post_journal(journal)
+            bill.status = "ISSUED"
+            bill.journal = journal
+            self._audit("accounting.bill.issued", bill)
+            self._commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return bill
+
     def create_payment(self, data: PaymentCreate) -> Payment:
         party = self._get(Party, data.party_id)
         if not party.is_customer or not party.is_active:
@@ -618,11 +728,118 @@ class AccountingService:
             raise
         return payment
 
+    def create_bill_payment(self, data: BillPaymentCreate) -> BillPayment:
+        party = self._get(Party, data.party_id)
+        if not party.is_supplier or not party.is_active:
+            raise AccountingError("Bill payment party must be an active supplier")
+        if money(sum((item.amount for item in data.allocations), Decimal("0"))) != money(
+            data.amount
+        ):
+            raise AccountingError("Bill payment allocations must equal the payment amount")
+        seen: set[UUID] = set()
+        allocations: list[BillPaymentAllocation] = []
+        for value in data.allocations:
+            if value.bill_id in seen:
+                raise AccountingError("A bill may be allocated only once per payment")
+            seen.add(value.bill_id)
+            bill = self._get(Bill, value.bill_id)
+            if bill.supplier_id != party.id or bill.status not in {
+                "ISSUED",
+                "PARTIALLY_PAID",
+            }:
+                raise ConflictError("Bill payment allocation targets an invalid bill")
+            if value.amount > bill.balance_due:
+                raise AccountingError("Allocation exceeds bill balance")
+            allocations.append(BillPaymentAllocation(**value.model_dump()))
+        payment = BillPayment(
+            **data.model_dump(exclude={"allocations"}), allocations=allocations
+        )
+        self.session.add(payment)
+        self._flush()
+        self._audit("accounting.bill_payment.created", payment)
+        self._commit()
+        return payment
+
+    def post_bill_payment(self, payment_id: UUID, data: BillPaymentPost) -> BillPayment:
+        payment = self._get_for_update(BillPayment, payment_id)
+        if payment.status != "DRAFT":
+            raise ConflictError("Only draft bill payments can be posted")
+        if data.cash_account_id == data.payable_account_id:
+            raise AccountingError("Cash and payable accounts must be different")
+        self._posting_account(data.cash_account_id, "ASSET", "CASH", "Cash")
+        self._posting_account(data.payable_account_id, "LIABILITY", "PAYABLE", "Payable")
+
+        bill_ids = sorted((allocation.bill_id for allocation in payment.allocations), key=str)
+        locked_bills = list(
+            self.session.scalars(
+                select(Bill)
+                .where(Bill.id.in_(bill_ids))
+                .order_by(Bill.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        bills = {bill.id: bill for bill in locked_bills}
+        if len(bills) != len(bill_ids):
+            raise NotFoundError("Bill not found")
+        for allocation in payment.allocations:
+            bill = bills[allocation.bill_id]
+            if bill.supplier_id != payment.party_id or bill.status not in {
+                "ISSUED",
+                "PARTIALLY_PAID",
+            }:
+                raise ConflictError("Bill payment allocation targets an invalid bill")
+            if allocation.amount > bill.balance_due:
+                raise AccountingError("Allocation exceeds current bill balance")
+            payable_accounts = (
+                {line.account_id for line in bill.journal.lines if line.credit > 0}
+                if bill.journal is not None
+                else set()
+            )
+            if payable_accounts != {data.payable_account_id}:
+                raise AccountingError(
+                    "Bill payment payable account must match the bill payable account"
+                )
+        period = self._period_for(payment.payment_date)
+        journal = self.create_journal(
+            JournalCreate(
+                entry_number=f"BPAY-{payment.reference}",
+                entry_date=payment.payment_date,
+                description=f"Bill payment {payment.reference}",
+                period_id=period.id,
+                lines=[
+                    {
+                        "account_id": data.payable_account_id,
+                        "debit": payment.amount,
+                        "credit": 0,
+                    },
+                    {"account_id": data.cash_account_id, "debit": 0, "credit": payment.amount},
+                ],
+            ),
+            commit=False,
+        )
+        try:
+            self._post_journal(journal)
+            for allocation in payment.allocations:
+                bill = bills[allocation.bill_id]
+                bill.amount_paid = money(bill.amount_paid + allocation.amount)
+                bill.status = "PAID" if bill.balance_due == 0 else "PARTIALLY_PAID"
+            payment.status = "POSTED"
+            payment.journal = journal
+            self._audit("accounting.bill_payment.posted", payment)
+            self._commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return payment
+
     def list(
         self,
         model: type[Account]
         | type[AccountCategory]
         | type[FinancialPeriod]
+        | type[Bill]
+        | type[BillPayment]
         | type[Invoice]
         | type[JournalEntry]
         | type[Party]
@@ -636,6 +853,8 @@ class AccountingService:
         model: type[Account]
         | type[AccountCategory]
         | type[FinancialPeriod]
+        | type[Bill]
+        | type[BillPayment]
         | type[Invoice]
         | type[JournalEntry]
         | type[Party]

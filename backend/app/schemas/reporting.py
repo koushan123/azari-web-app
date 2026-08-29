@@ -77,11 +77,25 @@ class ReceivablesReport(BaseModel):
     total_overdue: Decimal
 
 
+class PayableLine(BaseModel):
+    bill_id: UUID
+    bill_number: str
+    supplier_id: UUID
+    supplier_name: str
+    issue_date: date
+    due_date: date
+    status: str
+    total: Decimal
+    amount_paid: Decimal
+    balance_due: Decimal
+    days_overdue: int
+
+
 class PayableExposureReport(BaseModel):
     as_of: date
-    lines: list[AccountReportLine]
+    lines: list[PayableLine]
     total_payables: Decimal
-    supplier_detail_available: bool = False
+    supplier_detail_available: bool = True
 
 
 class CashFlowPoint(BaseModel):

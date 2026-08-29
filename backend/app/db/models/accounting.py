@@ -74,7 +74,8 @@ class Account(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("code", name="uq_accounts_code"),
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
         CheckConstraint(
-            "posting_role IN ('GENERAL','CASH','RECEIVABLE','REVENUE','TAX_LIABILITY')",
+            "posting_role IN ('GENERAL','CASH','RECEIVABLE','REVENUE','TAX_LIABILITY',"
+            "'PAYABLE','EXPENSE')",
             name="valid_posting_role",
         ),
     )
@@ -208,6 +209,66 @@ class InvoiceItem(UUIDPrimaryKeyMixin, Base):
     product: Mapped[Product | None] = relationship()
 
 
+class Bill(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "bills"
+    __table_args__ = (
+        UniqueConstraint("bill_number", name="uq_bills_bill_number"),
+        CheckConstraint("issue_date <= due_date", name="valid_dates"),
+        CheckConstraint(
+            "subtotal >= 0 AND tax >= 0 AND total >= 0 AND amount_paid >= 0",
+            name="nonnegative_totals",
+        ),
+        CheckConstraint(
+            "status IN ('DRAFT','ISSUED','PARTIALLY_PAID','PAID','CANCELLED')",
+            name="valid_status",
+        ),
+        Index("ix_bills_supplier_issue_date", "supplier_id", "issue_date"),
+        Index("ix_bills_status_due_date", "status", "due_date"),
+    )
+
+    bill_number: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    supplier_id: Mapped[UUID] = mapped_column(ForeignKey("parties.id", ondelete="RESTRICT"))
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="DRAFT", server_default="DRAFT")
+    subtotal: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
+    tax: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
+    total: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
+    amount_paid: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
+    journal_id: Mapped[UUID | None] = mapped_column(ForeignKey("journal_entries.id"), unique=True)
+    supplier: Mapped[Party] = relationship()
+    journal: Mapped[JournalEntry | None] = relationship()
+    items: Mapped[list["BillItem"]] = relationship(
+        back_populates="bill", cascade="all, delete-orphan"
+    )
+
+    @property
+    def balance_due(self) -> Decimal:
+        return self.total - self.amount_paid
+
+
+class BillItem(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "bill_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="positive_quantity"),
+        CheckConstraint(
+            "unit_price >= 0 AND tax >= 0 AND line_subtotal >= 0 AND line_total >= 0",
+            name="nonnegative_totals",
+        ),
+    )
+
+    bill_id: Mapped[UUID] = mapped_column(ForeignKey("bills.id", ondelete="CASCADE"))
+    product_id: Mapped[UUID | None] = mapped_column(ForeignKey("products.id", ondelete="RESTRICT"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(QUANTITY, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    tax: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"), server_default="0")
+    line_subtotal: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    bill: Mapped[Bill] = relationship(back_populates="items")
+    product: Mapped[Product | None] = relationship()
+
+
 class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "payments"
     __table_args__ = (
@@ -245,3 +306,46 @@ class PaymentAllocation(UUIDPrimaryKeyMixin, Base):
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     payment: Mapped[Payment] = relationship(back_populates="allocations")
     invoice: Mapped[Invoice] = relationship()
+
+
+class BillPayment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "bill_payments"
+    __table_args__ = (
+        UniqueConstraint("reference", name="uq_bill_payments_reference"),
+        CheckConstraint("amount > 0", name="positive_amount"),
+        CheckConstraint("status IN ('DRAFT','POSTED','CANCELLED')", name="valid_status"),
+        Index("ix_bill_payments_party_payment_date", "party_id", "payment_date"),
+        Index("ix_bill_payments_status_payment_date", "status", "payment_date"),
+    )
+
+    party_id: Mapped[UUID] = mapped_column(ForeignKey("parties.id", ondelete="RESTRICT"))
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    reference: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="DRAFT", server_default="DRAFT")
+    journal_id: Mapped[UUID | None] = mapped_column(ForeignKey("journal_entries.id"), unique=True)
+    party: Mapped[Party] = relationship()
+    journal: Mapped[JournalEntry | None] = relationship()
+    allocations: Mapped[list["BillPaymentAllocation"]] = relationship(
+        back_populates="bill_payment", cascade="all, delete-orphan"
+    )
+
+
+class BillPaymentAllocation(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "bill_payment_allocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "bill_payment_id", "bill_id", name="uq_bill_payment_allocations_pair"
+        ),
+        CheckConstraint("amount > 0", name="positive_amount"),
+        Index("ix_bill_payment_allocations_bill_id", "bill_id"),
+    )
+
+    bill_payment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("bill_payments.id", ondelete="CASCADE")
+    )
+    bill_id: Mapped[UUID] = mapped_column(ForeignKey("bills.id", ondelete="RESTRICT"))
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    bill_payment: Mapped[BillPayment] = relationship(back_populates="allocations")
+    bill: Mapped[Bill] = relationship()

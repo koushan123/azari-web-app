@@ -12,6 +12,8 @@ const POSTING_ROLE_LABELS = {
   RECEIVABLE: "دریافتنی تجاری",
   REVENUE: "درآمد فروش",
   TAX_LIABILITY: "بدهی مالیات",
+  PAYABLE: "پرداختنی تجاری",
+  EXPENSE: "هزینه خرید",
 } as const;
 
 function SaveError({ value }: { value: string }) { return value ? <div className="alert alert--error" role="alert">{value}</div> : null; }

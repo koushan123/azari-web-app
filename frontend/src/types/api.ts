@@ -7,7 +7,7 @@ export interface RegisterRequest { email: string; password: string; first_name: 
 export interface Party { id: UUID; name: string; email: string | null; phone: string | null; address: string | null; is_customer: boolean; is_supplier: boolean; is_active: boolean; created_at: string; updated_at: string }
 export interface Product { id: UUID; sku: string; name: string; description: string | null; unit: string; unit_price: Money; is_active: boolean; created_at: string; updated_at: string }
 export interface AccountCategory { id: UUID; name: string; account_type: "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE" }
-export type AccountPostingRole = "GENERAL" | "CASH" | "RECEIVABLE" | "REVENUE" | "TAX_LIABILITY";
+export type AccountPostingRole = "GENERAL" | "CASH" | "RECEIVABLE" | "REVENUE" | "TAX_LIABILITY" | "PAYABLE" | "EXPENSE";
 export interface Account { id: UUID; code: string; name: string; category_id: UUID; parent_id: UUID | null; is_active: boolean; posting_role: AccountPostingRole }
 export interface Period { id: UUID; name: string; start_date: string; end_date: string; status: string }
 export interface JournalLine { id?: UUID; account_id: UUID; description: string | null; debit: Money; credit: Money }
@@ -16,6 +16,10 @@ export interface InvoiceItem { id?: UUID; product_id: UUID | null; description: 
 export interface Invoice { id: UUID; invoice_number: string; customer_id: UUID; issue_date: string; due_date: string; status: string; subtotal: Money; tax: Money; total: Money; amount_paid: Money; balance_due: Money; journal_id: UUID | null; items: InvoiceItem[] }
 export interface Allocation { id?: UUID; invoice_id: UUID; amount: Money }
 export interface Payment { id: UUID; party_id: UUID; payment_date: string; amount: Money; reference: string; method: string; status: string; journal_id: UUID | null; allocations: Allocation[] }
+export interface BillItem { id?: UUID; product_id: UUID | null; description: string; quantity: string; unit_price: Money | null; tax: Money; line_subtotal?: Money; line_total?: Money }
+export interface Bill { id: UUID; bill_number: string; supplier_id: UUID; issue_date: string; due_date: string; status: string; subtotal: Money; tax: Money; total: Money; amount_paid: Money; balance_due: Money; journal_id: UUID | null; items: BillItem[] }
+export interface BillPaymentAllocation { id?: UUID; bill_id: UUID; amount: Money }
+export interface BillPayment { id: UUID; party_id: UUID; payment_date: string; amount: Money; reference: string; method: string; status: string; journal_id: UUID | null; allocations: BillPaymentAllocation[] }
 export interface AccountReportLine { account_id: UUID; code: string; name: string; account_type: string; debit: Money; credit: Money; balance: Money }
 export interface DashboardReport { start_date: string | null; end_date: string | null; as_of: string; total_revenue: Money; total_expenses: Money; net_income: Money; net_cash_flow: Money; outstanding_invoices: Money; overdue_invoices: Money; outstanding_invoice_count: number; overdue_invoice_count: number }
 export interface TrialBalance { start_date: string | null; end_date: string | null; lines: AccountReportLine[]; total_debit: Money; total_credit: Money; balanced: boolean }
@@ -24,7 +28,8 @@ export interface AccountSummary { start_date: string | null; end_date: string | 
 export interface BalanceSheet { as_of: string; assets: AccountReportLine[]; liabilities: AccountReportLine[]; equity: AccountReportLine[]; total_assets: Money; total_liabilities: Money; total_equity: Money; current_earnings: Money; total_liabilities_and_equity: Money; balanced: boolean }
 export interface ReceivableLine { invoice_id: UUID; invoice_number: string; customer_id: UUID; customer_name: string; issue_date: string; due_date: string; status: string; total: Money; amount_paid: Money; balance_due: Money; days_overdue: number }
 export interface Receivables { as_of: string; customer_id: UUID | null; lines: ReceivableLine[]; total_outstanding: Money; total_overdue: Money }
-export interface Payables { as_of: string; lines: AccountReportLine[]; total_payables: Money; supplier_detail_available: boolean }
+export interface PayableLine { bill_id: UUID; bill_number: string; supplier_id: UUID; supplier_name: string; issue_date: string; due_date: string; status: string; total: Money; amount_paid: Money; balance_due: Money; days_overdue: number }
+export interface Payables { as_of: string; lines: PayableLine[]; total_payables: Money; supplier_detail_available: boolean }
 export interface CashFlowPoint { date: string; inflow: Money; outflow: Money; net: Money }
 export interface CashFlow { start_date: string | null; end_date: string | null; points: CashFlowPoint[]; total_inflow: Money; total_outflow: Money; net_cash_flow: Money }
 export interface PartyTransaction { kind: string; record_id: UUID; reference: string; date: string; amount: Money; status: string }

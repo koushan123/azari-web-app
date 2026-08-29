@@ -12,6 +12,7 @@ export const navigation: Array<NavItem | NavGroup> = [
     { label: "حساب‌ها و سرفصل‌ها", path: "/accounts", permission: "accounts:read" }, { label: "اسناد حسابداری", path: "/journals", permission: "journals:read" }, { label: "دوره‌های مالی", path: "/periods", permission: "periods:read" },
   ]},
   { label: "فروش و دریافت", items: [{ label: "فاکتورها", path: "/invoices", permission: "invoices:read" }, { label: "پرداخت‌ها", path: "/payments", permission: "payments:read" }] },
+  { label: "خرید و پرداخت", items: [{ label: "صورتحساب‌های خرید", path: "/bills", permission: "bills:read" }, { label: "پرداخت به تأمین‌کنندگان", path: "/bill-payments", permission: "bill_payments:read" }] },
   { label: "گزارش‌ها", items: [
     { label: "تراز آزمایشی", path: "/reports/trial-balance", permission: "reports:read" }, { label: "صورت سود و زیان", path: "/reports/income-statement", permission: "reports:read" }, { label: "ترازنامه", path: "/reports/balance-sheet", permission: "reports:read" },
     { label: "درآمدها", path: "/reports/revenue", permission: "reports:read" }, { label: "هزینه‌ها", path: "/reports/expenses", permission: "reports:read" }, { label: "مطالبات", path: "/reports/receivables", permission: "reports:read" },

@@ -34,6 +34,12 @@ PERMISSIONS = {
     "payments:read": "View payments",
     "payments:write": "Create payments and allocations",
     "payments:post": "Post payments to the ledger",
+    "bills:read": "View supplier bills",
+    "bills:write": "Create supplier bills",
+    "bills:issue": "Issue supplier bills to the ledger",
+    "bill_payments:read": "View supplier bill payments",
+    "bill_payments:write": "Create supplier bill payments and allocations",
+    "bill_payments:post": "Post supplier bill payments to the ledger",
     "periods:read": "View financial periods",
     "periods:manage": "Create and close financial periods",
 }
@@ -45,6 +51,8 @@ ACCOUNTING_READ = {
     "journals:read",
     "invoices:read",
     "payments:read",
+    "bills:read",
+    "bill_payments:read",
     "periods:read",
 }
 ACCOUNTING_WRITE = ACCOUNTING_READ | {
@@ -57,6 +65,10 @@ ACCOUNTING_WRITE = ACCOUNTING_READ | {
     "invoices:issue",
     "payments:write",
     "payments:post",
+    "bills:write",
+    "bills:issue",
+    "bill_payments:write",
+    "bill_payments:post",
     "periods:manage",
 }
 

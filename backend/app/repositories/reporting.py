@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from backend.app.db.models import (
     Account,
     AccountCategory,
+    Bill,
+    BillPayment,
+    BillPaymentAllocation,
     Invoice,
     JournalEntry,
     JournalLine,
@@ -84,6 +87,34 @@ class ReportingRepository:
             statement = statement.where(Invoice.customer_id == customer_id)
         return [(row[0], Decimal(row[1])) for row in self.session.execute(statement)]
 
+    def payables_as_of(self, *, as_of: date) -> list[tuple[Bill, Decimal]]:
+        paid = func.coalesce(
+            func.sum(
+                case(
+                    (
+                        (BillPayment.status == "POSTED")
+                        & (BillPayment.payment_date <= as_of),
+                        BillPaymentAllocation.amount,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+        statement = (
+            select(Bill, paid.label("paid_as_of"))
+            .outerjoin(BillPaymentAllocation, BillPaymentAllocation.bill_id == Bill.id)
+            .outerjoin(BillPayment, BillPayment.id == BillPaymentAllocation.bill_payment_id)
+            .where(
+                Bill.issue_date <= as_of,
+                Bill.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
+            )
+            .group_by(Bill.id)
+            .having(Bill.total > paid)
+            .order_by(Bill.due_date, Bill.bill_number)
+        )
+        return [(row[0], Decimal(row[1])) for row in self.session.execute(statement)]
+
     def party(self, party_id: UUID) -> Party | None:
         return self.session.get(Party, party_id)
 
@@ -115,4 +146,14 @@ class ReportingRepository:
             statement = statement.where(Payment.payment_date >= start_date)
         if end_date is not None:
             statement = statement.where(Payment.payment_date <= end_date)
+        return list(self.session.scalars(statement))
+
+    def posted_bill_payments(
+        self, start_date: date | None = None, end_date: date | None = None
+    ) -> list[BillPayment]:
+        statement = select(BillPayment).where(BillPayment.status == "POSTED")
+        if start_date is not None:
+            statement = statement.where(BillPayment.payment_date >= start_date)
+        if end_date is not None:
+            statement = statement.where(BillPayment.payment_date <= end_date)
         return list(self.session.scalars(statement))
