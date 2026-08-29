@@ -489,6 +489,37 @@ def test_payment_post_locks_payment_and_invoice_rows_before_allocation() -> None
     assert locked_selects >= 2
 
 
+def test_period_account_mutation_and_journal_post_use_row_locks() -> None:
+    locked_entities: list[type[object]] = []
+
+    def record_lock(*args: object) -> None:
+        clause = args[1]
+        if getattr(clause, "_for_update_arg", None) is None:
+            return
+        locked_entities.extend(
+            description["entity"]
+            for description in getattr(clause, "column_descriptions", [])
+            if description.get("entity") is not None
+        )
+
+    event.listen(engine, "before_execute", record_lock)
+    try:
+        with SessionLocal() as session:
+            service, values = domain(session)
+            service.update_account(values.cash.id, AccountUpdate(name="Locked cash"))
+            assert locked_entities.count(Account) == 1
+
+            journal = service.create_journal(journal_data(values))
+            service.post_journal(journal.id)
+            assert locked_entities.count(FinancialPeriod) == 1
+            assert locked_entities.count(Account) == 3
+
+            service.close_period(values.period.id)
+            assert locked_entities.count(FinancialPeriod) == 2
+    finally:
+        event.remove(engine, "before_execute", record_lock)
+
+
 def test_payment_overallocation_invalid_sum_and_cancelled_invoice_fail() -> None:
     with SessionLocal() as session:
         service, values = domain(session)

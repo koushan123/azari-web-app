@@ -189,7 +189,7 @@ class AccountingService:
         return account
 
     def update_account(self, account_id: UUID, data: AccountUpdate) -> Account:
-        account = self._get(Account, account_id)
+        account = self._get_for_update(Account, account_id)
         values = data.model_dump(exclude_unset=True)
         category = account.category
         if "category_id" in values:
@@ -265,7 +265,7 @@ class AccountingService:
         return period
 
     def close_period(self, period_id: UUID) -> FinancialPeriod:
-        period = self._get(FinancialPeriod, period_id)
+        period = self._get_for_update(FinancialPeriod, period_id)
         period.status = "CLOSED"
         self._audit("accounting.period.closed", period)
         self._commit()
@@ -305,15 +305,20 @@ class AccountingService:
     def _post_journal(self, journal: JournalEntry) -> JournalEntry:
         if journal.status != "DRAFT":
             raise ConflictError("Only draft journals can be posted")
-        if journal.period.status != "OPEN":
+        period = self._get_for_update(FinancialPeriod, journal.period_id)
+        if period.status != "OPEN":
             raise ConflictError("Cannot post into a closed period")
+        accounts = {
+            account_id: self._get_for_update(Account, account_id)
+            for account_id in sorted({line.account_id for line in journal.lines}, key=str)
+        }
         if len(journal.lines) < 2:
             raise AccountingError("A posted journal requires at least two lines")
         debit = Decimal("0")
         credit = Decimal("0")
         for line in journal.lines:
             self._validate_line(line.debit, line.credit)
-            if not line.account.is_active:
+            if not accounts[line.account_id].is_active:
                 raise ConflictError("Inactive accounts cannot receive postings")
             debit += line.debit
             credit += line.credit
