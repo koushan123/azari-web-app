@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { Confirm, DateField, DateText, EmptyState, ErrorState, Field, LoadingState, Modal, Money, MoneyInput, PageHeader, StatusBadge } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
@@ -15,6 +15,16 @@ const POSTING_ROLE_LABELS = {
   PAYABLE: "پرداختنی تجاری",
   EXPENSE: "هزینه خرید",
 } as const;
+
+const POSTING_ROLES_BY_ACCOUNT_TYPE: Record<AccountCategory["account_type"], Array<keyof typeof POSTING_ROLE_LABELS>> = {
+  ASSET: ["GENERAL", "CASH", "RECEIVABLE"],
+  LIABILITY: ["GENERAL", "TAX_LIABILITY", "PAYABLE"],
+  EQUITY: ["GENERAL"],
+  REVENUE: ["GENERAL", "REVENUE"],
+  EXPENSE: ["GENERAL", "EXPENSE"],
+};
+
+export const postingRolesForAccountType = (accountType: AccountCategory["account_type"] | undefined) => accountType ? POSTING_ROLES_BY_ACCOUNT_TYPE[accountType] : [];
 
 function SaveError({ value }: { value: string }) { return value ? <div className="alert alert--error" role="alert">{value}</div> : null; }
 function TableShell({ columns, children }: { columns: string[]; children: React.ReactNode }) { return <div className="table-wrap"><table><thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody>{children}</tbody></table></div>; }
@@ -33,7 +43,44 @@ function ProductForm({ open, item, close, saved }: { open: boolean; item: Produc
 
 export function AccountsPage() { const { can } = useAuth(); const state = useAsync(async () => { const [accounts, categories] = await Promise.all([api.get<Account[]>("/accounts"), api.get<AccountCategory[]>("/account-categories")]); return { accounts, categories }; }, []); const [mode, setMode] = useState<"account" | "category" | null>(null); const category = (id: string) => state.data?.categories.find((c) => c.id === id); return <><PageHeader title="حساب‌ها و سرفصل‌ها" description="ساختار درختی حساب‌های دفتر کل" action={can("accounts:write") && <div className="button-group"><button className="button button--secondary" onClick={() => setMode("category")}>سرفصل جدید</button><button className="button button--primary" onClick={() => setMode("account")}>حساب جدید</button></div>}/>{state.loading ? <LoadingState/> : state.error ? <ErrorState message={state.error} retry={state.reload}/> : state.data?.accounts.length ? <TableShell columns={["کد", "نام حساب", "نوع", "حساب والد", "وضعیت"]}>{state.data.accounts.map((a) => <tr key={a.id}><td data-label="کد" dir="ltr"><strong>{a.code}</strong></td><td data-label="نام حساب">{a.parent_id && <span className="tree-mark">└</span>}{a.name}</td><td data-label="نوع">{ACCOUNT_TYPE_LABELS[category(a.category_id)?.account_type ?? ""]}</td><td data-label="حساب والد">{state.data?.accounts.find((p) => p.id === a.parent_id)?.name ?? "—"}</td><td data-label="وضعیت"><StatusBadge value={a.is_active ? "ACTIVE" : "INACTIVE"}/></td></tr>)}</TableShell> : <EmptyState title="حسابی تعریف نشده است"/>}<AccountForm open={mode !== null} mode={mode} data={state.data} close={() => setMode(null)} saved={() => { setMode(null); void state.reload(); }}/></>;
 }
-function AccountForm({ open, mode, data, close, saved }: { open: boolean; mode: "account" | "category" | null; data: { accounts: Account[]; categories: AccountCategory[] } | null; close: () => void; saved: () => void }) { const [error, setError] = useState(""); const submit = async (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget); try { if (mode === "category") await api.post("/account-categories", { name: String(f.get("name")), account_type: String(f.get("type")) }); else await api.post("/accounts", { code: String(f.get("code")), name: String(f.get("name")), category_id: String(f.get("category")), parent_id: String(f.get("parent")) || null, posting_role: String(f.get("postingRole")) }); saved(); } catch (reason) { setError(reason instanceof Error ? reason.message : "ذخیره ناموفق بود."); } }; return <Modal open={open} title={mode === "category" ? "سرفصل حساب جدید" : "حساب جدید"} onClose={close}><form className="form" onSubmit={submit}><SaveError value={error}/>{mode === "account" && <Field label="کد حساب"><input name="code" dir="ltr" required/></Field>}<Field label="نام"><input name="name" required/></Field>{mode === "category" ? <Field label="نوع حساب"><select name="type" required>{Object.entries(ACCOUNT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field> : <><Field label="سرفصل"><select name="category" required><option value="">انتخاب کنید</option>{data?.categories.map((c) => <option key={c.id} value={c.id}>{c.name} · {ACCOUNT_TYPE_LABELS[c.account_type]}</option>)}</select></Field><Field label="نقش ثبت حسابداری"><select name="postingRole" required>{Object.entries(POSTING_ROLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="حساب والد (اختیاری)"><select name="parent"><option value="">بدون والد</option>{data?.accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}</select></Field></>}<div className="form-actions"><button type="button" className="button button--secondary" onClick={close}>انصراف</button><button className="button button--primary">ذخیره</button></div></form></Modal>; }
+function AccountForm({ open, mode, data, close, saved }: { open: boolean; mode: "account" | "category" | null; data: { accounts: Account[]; categories: AccountCategory[] } | null; close: () => void; saved: () => void }) {
+  const [error, setError] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [postingRole, setPostingRole] = useState("");
+  const [parentId, setParentId] = useState("");
+  const selectedType = data?.categories.find((category) => category.id === categoryId)?.account_type;
+  const compatibleRoles = postingRolesForAccountType(selectedType);
+  const compatibleParents = data?.accounts.filter((account) => account.category_id === categoryId) ?? [];
+  useEffect(() => {
+    if (open) {
+      setError("");
+      setCategoryId("");
+      setPostingRole("");
+      setParentId("");
+    }
+  }, [open, mode]);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      if (mode === "category") {
+        await api.post("/account-categories", { name: String(form.get("name")), account_type: String(form.get("type")) });
+      } else {
+        await api.post("/accounts", {
+          code: String(form.get("code")),
+          name: String(form.get("name")),
+          category_id: categoryId,
+          parent_id: parentId || null,
+          posting_role: postingRole,
+        });
+      }
+      saved();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "ذخیره ناموفق بود.");
+    }
+  };
+  return <Modal open={open} title={mode === "category" ? "سرفصل حساب جدید" : "حساب جدید"} onClose={close}><form className="form" onSubmit={submit}><SaveError value={error}/>{mode === "account" && <Field label="کد حساب"><input name="code" dir="ltr" required/></Field>}<Field label="نام"><input name="name" required/></Field>{mode === "category" ? <Field label="نوع حساب"><select name="type" required>{Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field> : <><Field label="سرفصل"><select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setPostingRole(""); setParentId(""); }} required><option value="">انتخاب کنید</option>{data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name} · {ACCOUNT_TYPE_LABELS[category.account_type]}</option>)}</select></Field><Field label="نقش ثبت حسابداری"><select value={postingRole} onChange={(event) => setPostingRole(event.target.value)} required disabled={!selectedType}><option value="">انتخاب کنید</option>{compatibleRoles.map((role) => <option key={role} value={role}>{POSTING_ROLE_LABELS[role]}</option>)}</select></Field><Field label="حساب والد (اختیاری)"><select value={parentId} onChange={(event) => setParentId(event.target.value)} disabled={!selectedType}><option value="">بدون والد</option>{compatibleParents.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field></>}<div className="form-actions"><button type="button" className="button button--secondary" onClick={close}>انصراف</button><button className="button button--primary">ذخیره</button></div></form></Modal>;
+}
 
 export function PeriodsPage() { const { can } = useAuth(); const state = useAsync(() => api.get<Period[]>("/periods"), []); const [open, setOpen] = useState(false); const [closing, setClosing] = useState<Period | null>(null); const [dates, setDates] = useState({ start: "", end: "" }); const create = async (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget); await api.post("/periods", { name: String(f.get("name")), start_date: dates.start, end_date: dates.end }); setOpen(false); void state.reload(); }; const closePeriod = async () => { if (!closing) return; await api.post(`/periods/${closing.id}/close`); setClosing(null); void state.reload(); };
   return <><PageHeader title="دوره‌های مالی" description="بازه‌های مجاز برای ثبت اسناد حسابداری" action={can("periods:manage") && <button className="button button--primary" onClick={() => setOpen(true)}>دوره جدید</button>}/>{state.loading ? <LoadingState/> : state.error ? <ErrorState message={state.error} retry={state.reload}/> : state.data?.length ? <div className="period-grid">{state.data.map((p) => <CardPeriod key={p.id} p={p} canClose={can("periods:manage") && p.status === "OPEN"} close={() => setClosing(p)}/>)}</div> : <EmptyState title="دوره مالی تعریف نشده است"/>}<Modal open={open} title="دوره مالی جدید" onClose={() => setOpen(false)}><form className="form" onSubmit={create}><Field label="نام دوره"><input name="name" required/></Field><div className="form-grid"><DateField label="تاریخ شروع" value={dates.start} onChange={(start) => setDates((v) => ({ ...v, start }))} required/><DateField label="تاریخ پایان" value={dates.end} onChange={(end) => setDates((v) => ({ ...v, end }))} required/></div><div className="form-actions"><button type="button" className="button button--secondary" onClick={() => setOpen(false)}>انصراف</button><button className="button button--primary">ذخیره</button></div></form></Modal><Confirm open={Boolean(closing)} title="بستن دوره مالی" message={`پس از بستن «${closing?.name ?? ""}» ثبت سند در این بازه ممکن نیست. ادامه می‌دهید؟`} confirmLabel="بستن دوره" onConfirm={() => void closePeriod()} onClose={() => setClosing(null)}/></>;
