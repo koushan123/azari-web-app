@@ -47,7 +47,8 @@ h1, h2, h3, p { margin-top: 0; }
 .nav-group { position: relative; }
 .nav-group[open] > summary { background: var(--green-soft); color: var(--green-dark); }
 .nav-group summary::-webkit-details-marker { display: none; }
-.nav-menu { position: absolute; top: calc(100% + 9px); right: 0; width: 230px; background: color-mix(in srgb,var(--surface),transparent 2%); border: 1px solid var(--border); padding: 8px; box-shadow: var(--shadow-lg); border-radius: 15px; display: grid; backdrop-filter: blur(15px); }
+.nav-menu { position: absolute; z-index: 20; top: calc(100% + 9px); right: 0; width: 230px; background: color-mix(in srgb,var(--surface),transparent 2%); border: 1px solid var(--border); padding: 8px; box-shadow: var(--shadow-lg); border-radius: 15px; display: grid; backdrop-filter: blur(15px); }
+.nav-menu::before { content: ""; position: absolute; right: 0; left: 0; top: -10px; height: 10px; }
 .nav-menu a { padding: 10px 12px; border-radius: 7px; font-size: .91rem; }
 .nav-menu a:hover, .nav-menu a.active { background: var(--green-soft); color: var(--green-dark); }
 .top-actions { display: flex; gap: 8px; align-items: center; }
