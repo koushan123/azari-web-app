@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import indexHtml from "../index.html?raw";
+import mainSource from "../src/main.tsx?raw";
+import styleSource from "../src/styles.css?raw";
 import appSource from "../src/App.tsx?raw";
 import adminSource from "../src/pages/AdminPages.tsx?raw";
 import dashboardSource from "../src/pages/DashboardPage.tsx?raw";
@@ -26,6 +28,7 @@ Object.assign(globalThis, {
 });
 
 test("document is Persian and RTL", () => { assert.match(indexHtml, /<html lang="fa" dir="rtl">/); assert.match(indexHtml, /حسابداری آذری/); });
+test("Persian typography is self-hosted with Vazirmatn", () => { assert.match(mainSource, /@fontsource\/vazirmatn\/400\.css/); assert.match(mainSource, /@fontsource\/vazirmatn\/800\.css/); assert.match(styleSource, /font-family: Vazirmatn/); });
 test("financial formatting always uses English digits", () => { assert.equal(formatMoney("123456.7"), "123,456.70"); assert.equal(formatNumber(1234.5), "1,234.5"); assert.equal(formatPercent(.831), "83.1%"); assert.equal(toEnglishDigits("۱۲۳٤٥"), "12345"); });
 test("Jalali and Gregorian conversion round trip", () => { assert.equal(gregorianToJalali("2026-08-25"), "1405/06/03"); assert.equal(jalaliToGregorian("۱۴۰۵/۰۶/۰۳"), "2026-08-25"); assert.throws(() => jalaliToGregorian("1404/12/30")); });
 test("light theme is default and switching is deterministic", () => { assert.equal(defaultTheme(null), "light"); assert.equal(defaultTheme("dark"), "dark"); assert.equal(nextTheme("light"), "dark"); assert.equal(nextTheme("dark"), "light"); });

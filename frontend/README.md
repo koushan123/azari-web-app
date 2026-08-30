@@ -32,5 +32,6 @@ hides actions outside a user's permission set and still handles backend 403
 responses because backend RBAC is authoritative. All meaningful UI strings are
 Persian; numeric output deliberately uses English digits.
 
-IRANSans is referenced only as the first installed-font preference. No
-commercial font is bundled. Calendar attribution is in `THIRD_PARTY_NOTICES.md`.
+Vazirmatn is bundled as a self-hosted webfont through `@fontsource/vazirmatn`,
+so Persian typography is consistent without relying on fonts installed on the
+user's device. Calendar attribution is in `THIRD_PARTY_NOTICES.md`.
