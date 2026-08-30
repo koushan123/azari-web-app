@@ -9,6 +9,7 @@ import {
   LoadingState,
   Modal,
   Money,
+  MoneyInput,
   PageHeader,
   StatusBadge,
 } from "../components/ui";
@@ -226,8 +227,8 @@ function BillCreate({
             </Field>
             <Field label="شرح"><input value={item.description} onChange={(event) => update(index, "description", event.target.value)} required disabled={busy} /></Field>
             <Field label="تعداد"><input type="number" dir="ltr" min="0.0001" step="0.0001" value={item.quantity} onChange={(event) => update(index, "quantity", event.target.value)} required disabled={busy} /></Field>
-            <Field label="قیمت واحد"><input type="number" dir="ltr" min="0" step="0.01" value={item.unit_price ?? ""} onChange={(event) => update(index, "unit_price", event.target.value)} disabled={busy} /></Field>
-            <Field label="مالیات"><input type="number" dir="ltr" min="0" step="0.01" value={item.tax} onChange={(event) => update(index, "tax", event.target.value)} disabled={busy} /></Field>
+            <Field label="قیمت واحد"><MoneyInput min="0" value={item.unit_price ?? ""} onValueChange={(value) => update(index, "unit_price", value)} disabled={busy} /></Field>
+            <Field label="مالیات"><MoneyInput min="0" value={item.tax} onValueChange={(value) => update(index, "tax", value)} disabled={busy} /></Field>
             <button type="button" className="icon-button" disabled={items.length === 1 || busy} onClick={() => setItems((old) => old.filter((_, i) => i !== index))}>×</button>
           </div>
         ))}</div>
@@ -375,12 +376,12 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
         <div className="form-grid form-grid--3">
           <Field label="تأمین‌کننده"><select value={party} onChange={(event) => { setParty(event.target.value); setAllocations([{ bill_id: "", amount: "0" }]); }} required disabled={activeSuppliers.length === 0 || busy}><option value="">انتخاب تأمین‌کننده</option>{activeSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></Field>
           <DateField label="تاریخ پرداخت" value={paymentDate} onChange={setPaymentDate} required />
-          <Field label="مبلغ پرداخت (ریال)"><input name="amount" type="number" dir="ltr" min="0.01" step="0.01" required disabled={busy} /></Field>
+          <Field label="مبلغ پرداخت (ریال)"><MoneyInput name="amount" min="0.01" required disabled={busy} /></Field>
           <Field label="شماره مرجع"><input name="reference" dir="ltr" required disabled={busy} /></Field>
           <Field label="روش پرداخت"><select name="method" disabled={busy}><option>انتقال بانکی</option><option>کارت‌خوان</option><option>نقدی</option><option>چک</option></select></Field>
         </div>
         <h3>تخصیص به صورتحساب‌ها</h3>
-        {allocations.map((allocation, index) => <div className="allocation-row" key={index}><Field label="صورتحساب"><select value={allocation.bill_id} onChange={(event) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, bill_id: event.target.value } : item))} required disabled={party === "" || eligible.length === 0 || busy}><option value="">انتخاب صورتحساب</option>{eligible.map((bill) => <option key={bill.id} value={bill.id}>{bill.bill_number} · مانده {formatMoney(bill.balance_due)}</option>)}</select></Field><Field label="مبلغ تخصیص"><input type="number" dir="ltr" min="0.01" step="0.01" value={allocation.amount} onChange={(event) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))} required disabled={busy} /></Field><button type="button" className="icon-button" disabled={allocations.length === 1 || busy} onClick={() => setAllocations((old) => old.filter((_, i) => i !== index))}>×</button></div>)}
+        {allocations.map((allocation, index) => <div className="allocation-row" key={index}><Field label="صورتحساب"><select value={allocation.bill_id} onChange={(event) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, bill_id: event.target.value } : item))} required disabled={party === "" || eligible.length === 0 || busy}><option value="">انتخاب صورتحساب</option>{eligible.map((bill) => <option key={bill.id} value={bill.id}>{bill.bill_number} · مانده {formatMoney(bill.balance_due)}</option>)}</select></Field><Field label="مبلغ تخصیص"><MoneyInput min="0.01" value={allocation.amount} onValueChange={(value) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, amount: value } : item))} required disabled={busy} /></Field><button type="button" className="icon-button" disabled={allocations.length === 1 || busy} onClick={() => setAllocations((old) => old.filter((_, i) => i !== index))}>×</button></div>)}
         <button type="button" className="text-button" disabled={busy} onClick={() => setAllocations((old) => [...old, { bill_id: "", amount: "0" }])}>+ افزودن تخصیص</button>
         <p className="allocation-total">جمع تخصیص: <Money value={total} /></p>
         <div className="form-actions"><button type="button" className="button button--secondary" onClick={close} disabled={busy}>انصراف</button><button className="button button--primary" disabled={!prerequisitesReady || busy}>{busy ? "در حال ذخیره…" : "ذخیره پیش‌نویس"}</button></div>

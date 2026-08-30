@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from "react";
 import { usePreferences } from "../theme/ThemeContext";
 import { formatDate, gregorianToJalali, jalaliToGregorian } from "../utils/date";
 import { formatMoney, statusLabel } from "../utils/format";
@@ -12,6 +12,36 @@ export function StatusBadge({ value }: { value: string }) { const danger = ["CAN
 export function Money({ value, suffix = "ریال" }: { value: string | number; suffix?: string }) { return <span className={Number(value) < 0 ? "negative money" : "money"} dir="ltr">{formatMoney(value)} <small>{suffix}</small></span>; }
 export function DateText({ value }: { value: string | null | undefined }) { const { calendar } = usePreferences(); return <time dateTime={value ?? undefined} dir="ltr">{formatDate(value, calendar)}</time>; }
 export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: ReactNode }) { return <label className={`field ${error ? "field--error" : ""}`}><span>{label}</span>{children}{hint && <small>{hint}</small>}{error && <small role="alert">{error}</small>}</label>; }
+export const normalizeMoneyInput = (value: string) => {
+  const ascii = value.replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit))).replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+  const cleaned = ascii.replace(/٫/g, ".").replace(/[,٬\s]/g, "").replace(/[^\d.]/g, "");
+  const [whole = "", ...fractions] = cleaned.split(".");
+  return fractions.length ? `${whole || "0"}.${fractions.join("").slice(0, 2)}` : whole;
+};
+export const formatMoneyInput = (value: string | number | null | undefined) => {
+  const normalized = normalizeMoneyInput(String(value ?? ""));
+  if (!normalized) return "";
+  const [whole, fraction] = normalized.split(".");
+  const grouped = whole.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fraction === undefined ? grouped : `${grouped}.${fraction}`;
+};
+type MoneyInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "defaultValue" | "onChange" | "name"> & {
+  name?: string;
+  value?: string | number | null;
+  defaultValue?: string | number | null;
+  onValueChange?: (value: string) => void;
+};
+export function MoneyInput({ name, value, defaultValue, onValueChange, ...props }: MoneyInputProps) {
+  const controlled = value !== undefined;
+  const [internal, setInternal] = useState(() => normalizeMoneyInput(String(defaultValue ?? "")));
+  const raw = controlled ? normalizeMoneyInput(String(value ?? "")) : internal;
+  const change = (next: string) => {
+    const normalized = normalizeMoneyInput(next);
+    if (!controlled) setInternal(normalized);
+    onValueChange?.(normalized);
+  };
+  return <><input {...props} type="text" inputMode="decimal" dir="ltr" value={formatMoneyInput(raw)} onChange={(event) => change(event.target.value)} />{name && <input type="hidden" name={name} value={raw} />}</>;
+}
 export function DateField({ label, value, onChange, required }: { label: string; value: string; onChange: (iso: string) => void; required?: boolean }) { const { calendar } = usePreferences(); const [text, setText] = useState(calendar === "jalali" && value ? gregorianToJalali(value) : value); const [error, setError] = useState(""); useEffect(() => setText(calendar === "jalali" && value ? gregorianToJalali(value) : value), [calendar, value]);
   const change = (next: string) => { setText(next); setError(""); if (calendar === "gregorian") { onChange(next); return; } try { if (next.length >= 8) onChange(jalaliToGregorian(next)); } catch (reason) { setError(reason instanceof Error ? reason.message : "تاریخ نامعتبر است."); } };
   return <Field label={`${label} (${calendar === "jalali" ? "شمسی" : "میلادی"})`} error={error}><input type={calendar === "gregorian" ? "date" : "text"} dir="ltr" placeholder={calendar === "jalali" ? "1405/01/01" : undefined} value={text} onChange={(e) => change(e.target.value)} required={required} /></Field>;
