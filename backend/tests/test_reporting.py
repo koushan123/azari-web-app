@@ -42,6 +42,7 @@ class ReportDomain:
     cash: Account
     receivable: Account
     payable: Account
+    customer_credit: Account
     equity: Account
     revenue: Account
     expense: Account
@@ -83,51 +84,78 @@ def report_domain(session: Session) -> ReportDomain:
         last_name="User",
         roles=[admin],
     )
+    session.add(actor)
+    session.flush()
     categories = {
-        kind: AccountCategory(name=f"Report {kind}", account_type=kind)
+        kind: AccountCategory(
+            owner_id=actor.id, name=f"Report {kind}", account_type=kind
+        )
         for kind in ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]
     }
-    session.add_all([actor, *categories.values()])
-    session.flush()
+    session.add_all(categories.values())
     cash = Account(
+        owner_id=actor.id,
         code="R-100", name="Cash", category=categories["ASSET"], posting_role="CASH"
     )
     receivable = Account(
+        owner_id=actor.id,
         code="R-110",
         name="Receivable",
         category=categories["ASSET"],
         posting_role="RECEIVABLE",
     )
     payable = Account(
+        owner_id=actor.id,
         code="R-200",
         name="Payable",
         category=categories["LIABILITY"],
         posting_role="PAYABLE",
     )
-    equity = Account(code="R-300", name="Capital", category=categories["EQUITY"])
+    customer_credit = Account(
+        owner_id=actor.id,
+        code="R-220",
+        name="Customer credit",
+        category=categories["LIABILITY"],
+        posting_role="CUSTOMER_CREDIT",
+    )
+    equity = Account(
+        owner_id=actor.id,
+        code="R-300",
+        name="Capital",
+        category=categories["EQUITY"],
+    )
     revenue = Account(
+        owner_id=actor.id,
         code="R-400",
         name="Revenue",
         category=categories["REVENUE"],
         posting_role="REVENUE",
     )
     expense = Account(
+        owner_id=actor.id,
         code="R-500",
         name="Expense",
         category=categories["EXPENSE"],
         posting_role="EXPENSE",
     )
     period = FinancialPeriod(
+        owner_id=actor.id,
         name="Report 2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31)
     )
-    party = Party(name="Report Customer", is_customer=True)
-    supplier = Party(name="Report Supplier", is_supplier=True)
-    product = Product(sku="R-P", name="Reporting", unit_price=Decimal("100"))
+    party = Party(owner_id=actor.id, name="Report Customer", is_customer=True)
+    supplier = Party(owner_id=actor.id, name="Report Supplier", is_supplier=True)
+    product = Product(
+        owner_id=actor.id,
+        sku="R-P",
+        name="Reporting",
+        unit_price=Decimal("100"),
+    )
     session.add_all(
         [
             cash,
             receivable,
             payable,
+            customer_credit,
             equity,
             revenue,
             expense,
@@ -226,6 +254,7 @@ def report_domain(session: Session) -> ReportDomain:
         cash,
         receivable,
         payable,
+        customer_credit,
         equity,
         revenue,
         expense,
@@ -235,7 +264,7 @@ def report_domain(session: Session) -> ReportDomain:
 def test_financial_statements_use_only_posted_balanced_activity() -> None:
     with SessionLocal() as session:
         values = report_domain(session)
-        reports = ReportingService(session)
+        reports = ReportingService(session, values.actor.id)
         trial = reports.trial_balance(end_date=date(2026, 2, 28))
         assert trial.balanced and trial.total_debit == trial.total_credit
         assert (
@@ -258,7 +287,7 @@ def test_financial_statements_use_only_posted_balanced_activity() -> None:
 def test_receivables_historical_as_of_filter_payables_cash_and_dashboard() -> None:
     with SessionLocal() as session:
         values = report_domain(session)
-        reports = ReportingService(session)
+        reports = ReportingService(session, values.actor.id)
         before_payment = reports.receivables(date(2026, 2, 16), values.party.id)
         assert before_payment.total_outstanding == Decimal("300.00")
         assert before_payment.total_overdue == Decimal("300.00")
@@ -303,7 +332,7 @@ def test_draft_invoice_does_not_affect_receivables_or_dashboard() -> None:
                 ],
             )
         )
-        reports = ReportingService(session)
+        reports = ReportingService(session, values.actor.id)
 
         receivables = reports.receivables(date(2026, 2, 28))
         dashboard = reports.dashboard(
@@ -319,10 +348,54 @@ def test_draft_invoice_does_not_affect_receivables_or_dashboard() -> None:
 def test_party_history_filters_and_invalid_ranges() -> None:
     with SessionLocal() as session:
         values = report_domain(session)
-        reports = ReportingService(session)
+        reports = ReportingService(session, values.actor.id)
         history = reports.party_history(values.party.id, date(2026, 2, 1), date(2026, 2, 28))
         assert [item.kind for item in history.transactions] == ["INVOICE", "PAYMENT"]
+        assert history.purchase_count == 1
+        assert history.total_purchased == Decimal("300.00")
+        assert history.total_received == Decimal("100.00")
+        assert history.receivable_balance == Decimal("200.00")
+        assert history.customer_credit_balance == Decimal("0.00")
+        assert history.net_balance == Decimal("200.00")
+        assert history.balance_direction == "CUSTOMER_OWES"
+        assert history.invoices[0].items[0].description == "Three units"
+        assert history.invoices[0].balance_due == Decimal("200.00")
+        assert history.payments[0].reference == "R-PAY-1"
+        summaries = reports.customers()
+        assert len(summaries) == 1
+        assert summaries[0].party_id == values.party.id
+        assert summaries[0].purchase_count == 1
         with pytest.raises(AccountingError, match="start_date"):
             reports.trial_balance(date(2026, 3, 1), date(2026, 2, 1))
         with pytest.raises(AccountingError, match="start_date"):
             reports.cash_flow(date(2026, 3, 1), date(2026, 2, 1))
+
+
+def test_party_history_exposes_current_customer_credit_balance() -> None:
+    with SessionLocal() as session:
+        values = report_domain(session)
+        accounting = AccountingService(session, values.actor)
+        payment = accounting.create_payment(
+            PaymentCreate(
+                party_id=values.party.id,
+                payment_date=date(2026, 2, 22),
+                amount=Decimal("50"),
+                reference="R-CREDIT-1",
+                method="check",
+                allocations=[{"invoice_id": values.invoice.id, "amount": Decimal("25")}],
+            )
+        )
+        accounting.post_payment(
+            payment.id,
+            PaymentPost(
+                cash_account_id=values.cash.id,
+                receivable_account_id=values.receivable.id,
+                customer_credit_account_id=values.customer_credit.id,
+            ),
+        )
+
+        history = ReportingService(session, values.actor.id).party_history(values.party.id)
+        assert history.customer_credit_balance == Decimal("25.00")
+        assert history.receivable_balance == Decimal("175.00")
+        assert history.net_balance == Decimal("150.00")
+        assert history.balance_direction == "CUSTOMER_OWES"

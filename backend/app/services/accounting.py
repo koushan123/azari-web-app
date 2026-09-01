@@ -75,7 +75,7 @@ class AccountingService:
     def __init__(self, session: Session, actor: User) -> None:
         self.session = session
         self.actor = actor
-        self.repo = AccountingRepository(session)
+        self.repo = AccountingRepository(session, actor.id)
         self.audit = AuditRepository(session)
 
     def _commit(self) -> None:
@@ -93,7 +93,12 @@ class AccountingService:
             raise ConflictError("A unique or database constraint was violated") from exc
 
     def _get(self, model: type[ModelT], item_id: UUID) -> ModelT:
-        item = self.session.get(model, item_id)
+        item = self.session.scalar(
+            select(model).where(
+                model.id == item_id,  # type: ignore[attr-defined]
+                model.owner_id == self.actor.id,  # type: ignore[attr-defined]
+            )
+        )
         if item is None:
             raise NotFoundError(f"{model.__name__} not found")
         return item
@@ -101,7 +106,10 @@ class AccountingService:
     def _get_for_update(self, model: type[ModelT], item_id: UUID) -> ModelT:
         item = self.session.scalar(
             select(model)
-            .where(model.id == item_id)  # type: ignore[attr-defined]
+            .where(
+                model.id == item_id,  # type: ignore[attr-defined]
+                model.owner_id == self.actor.id,  # type: ignore[attr-defined]
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -130,6 +138,7 @@ class AccountingService:
             "TAX_LIABILITY": "LIABILITY",
             "PAYABLE": "LIABILITY",
             "EXPENSE": "EXPENSE",
+            "CUSTOMER_CREDIT": "LIABILITY",
         }
         required_type = required_types.get(posting_role)
         if required_type is not None and category.account_type != required_type:
@@ -149,7 +158,7 @@ class AccountingService:
     def create_party(self, data: PartyCreate) -> Party:
         if not data.is_customer and not data.is_supplier:
             raise AccountingError("A party must be a customer or supplier")
-        party = Party(**data.model_dump())
+        party = Party(owner_id=self.actor.id, **data.model_dump())
         self.session.add(party)
         self._flush()
         self._audit("accounting.party.created", party)
@@ -167,7 +176,7 @@ class AccountingService:
         return party
 
     def create_product(self, data: ProductCreate) -> Product:
-        product = Product(**data.model_dump())
+        product = Product(owner_id=self.actor.id, **data.model_dump())
         self.session.add(product)
         self._flush()
         self._audit("accounting.product.created", product)
@@ -183,7 +192,7 @@ class AccountingService:
         return product
 
     def create_category(self, data: CategoryCreate) -> AccountCategory:
-        category = AccountCategory(**data.model_dump())
+        category = AccountCategory(owner_id=self.actor.id, **data.model_dump())
         self.session.add(category)
         self._commit()
         return category
@@ -193,7 +202,7 @@ class AccountingService:
         self._validate_posting_role(category, data.posting_role)
         if data.parent_id is not None:
             self._get(Account, data.parent_id)
-        account = Account(**data.model_dump())
+        account = Account(owner_id=self.actor.id, **data.model_dump())
         self.session.add(account)
         self._flush()
         self._audit("accounting.account.created", account)
@@ -263,13 +272,14 @@ class AccountingService:
             raise AccountingError("Period start date must not exceed end date")
         overlap = self.session.scalar(
             select(FinancialPeriod).where(
+                FinancialPeriod.owner_id == self.actor.id,
                 FinancialPeriod.start_date <= data.end_date,
                 FinancialPeriod.end_date >= data.start_date,
             )
         )
         if overlap is not None:
             raise ConflictError("Financial periods cannot overlap")
-        period = FinancialPeriod(**data.model_dump())
+        period = FinancialPeriod(owner_id=self.actor.id, **data.model_dump())
         self.session.add(period)
         self._flush()
         self._audit("accounting.period.created", period)
@@ -300,6 +310,7 @@ class AccountingService:
             self._get(Account, value.account_id)
             lines.append(JournalLine(**value.model_dump()))
         journal = JournalEntry(
+            owner_id=self.actor.id,
             entry_number=data.entry_number,
             entry_date=data.entry_date,
             description=data.description,
@@ -357,7 +368,10 @@ class AccountingService:
         if original.reversal_of_id is not None:
             raise ConflictError("Reversal journals cannot be reversed")
         existing_reversal = self.session.scalar(
-            select(JournalEntry).where(JournalEntry.reversal_of_id == original.id)
+            select(JournalEntry).where(
+                JournalEntry.owner_id == self.actor.id,
+                JournalEntry.reversal_of_id == original.id,
+            )
         )
         if existing_reversal is not None:
             raise ConflictError("Journal has already been reversed")
@@ -377,6 +391,7 @@ class AccountingService:
         ):
             raise ConflictError("Source-document journals cannot be reversed directly")
         reversal = JournalEntry(
+            owner_id=self.actor.id,
             entry_number=f"REV-{original.entry_number}",
             entry_date=original.entry_date,
             description=f"Reversal of {original.entry_number}: {original.description}",
@@ -417,12 +432,18 @@ class AccountingService:
                 raise AccountingError("Customer name is required")
             existing_customer = self.session.scalar(
                 select(Party).where(
+                    Party.owner_id == self.actor.id,
                     Party.name == customer_name,
                     Party.is_active.is_(True),
                 )
             )
             if existing_customer is None:
-                customer = Party(name=customer_name, is_customer=True, is_supplier=False)
+                customer = Party(
+                    owner_id=self.actor.id,
+                    name=customer_name,
+                    is_customer=True,
+                    is_supplier=False,
+                )
                 self.session.add(customer)
                 self._flush()
             else:
@@ -460,6 +481,7 @@ class AccountingService:
                 )
             )
         invoice = Invoice(
+            owner_id=self.actor.id,
             invoice_number=data.invoice_number,
             customer_id=customer.id,
             issue_date=data.issue_date,
@@ -477,15 +499,14 @@ class AccountingService:
         if data.payment_method == "CHECK":
             if not data.checks:
                 raise AccountingError("Check invoices require at least one check")
-            if money(sum((check.amount for check in data.checks), Decimal("0"))) != invoice.total:
-                raise AccountingError("Check amounts must equal the invoice total")
-            sayad_ids = [check.sayad_id for check in data.checks]
+            sayad_ids = [check.sayad_id for check in data.checks if check.sayad_id is not None]
             if len(sayad_ids) != len(set(sayad_ids)):
                 raise AccountingError("Each check must have a unique Sayad identifier")
             if any(check.due_date < data.issue_date for check in data.checks):
                 raise AccountingError("Check due dates cannot precede the invoice issue date")
             invoice.checks = [
-                InvoiceCheck(**check.model_dump()) for check in data.checks
+                InvoiceCheck(owner_id=self.actor.id, **check.model_dump())
+                for check in data.checks
             ]
         self.session.add(invoice)
         self._flush()
@@ -559,6 +580,7 @@ class AccountingService:
     def _period_for(self, value: date) -> FinancialPeriod:
         period = self.session.scalar(
             select(FinancialPeriod).where(
+                FinancialPeriod.owner_id == self.actor.id,
                 FinancialPeriod.start_date <= value,
                 FinancialPeriod.end_date >= value,
             )
@@ -602,6 +624,7 @@ class AccountingService:
                 )
             )
         bill = Bill(
+            owner_id=self.actor.id,
             bill_number=data.bill_number,
             supplier_id=data.supplier_id,
             issue_date=data.issue_date,
@@ -664,10 +687,18 @@ class AccountingService:
         party = self._get(Party, data.party_id)
         if not party.is_customer or not party.is_active:
             raise AccountingError("Payment party must be an active customer")
-        if money(sum((item.amount for item in data.allocations), Decimal("0"))) != money(
-            data.amount
-        ):
-            raise AccountingError("Payment allocations must equal the payment amount")
+        allocation_total = money(
+            sum((item.amount for item in data.allocations), Decimal("0"))
+        )
+        if allocation_total > money(data.amount):
+            raise AccountingError("Payment allocations cannot exceed the payment amount")
+        if data.customer_credit_account_id is not None:
+            self._posting_account(
+                data.customer_credit_account_id,
+                "LIABILITY",
+                "CUSTOMER_CREDIT",
+                "Customer credit",
+            )
         seen: set[UUID] = set()
         allocations: list[PaymentAllocation] = []
         for value in data.allocations:
@@ -683,7 +714,11 @@ class AccountingService:
             if value.amount > invoice.balance_due:
                 raise AccountingError("Allocation exceeds invoice balance")
             allocations.append(PaymentAllocation(**value.model_dump()))
-        payment = Payment(**data.model_dump(exclude={"allocations"}), allocations=allocations)
+        payment = Payment(
+            owner_id=self.actor.id,
+            **data.model_dump(exclude={"allocations"}),
+            allocations=allocations,
+        )
         self.session.add(payment)
         self._flush()
         self._audit("accounting.payment.created", payment)
@@ -705,6 +740,23 @@ class AccountingService:
         self._posting_account(
             data.receivable_account_id, "ASSET", "RECEIVABLE", "Receivable"
         )
+        allocation_total = money(
+            sum((allocation.amount for allocation in payment.allocations), Decimal("0"))
+        )
+        if allocation_total > money(payment.amount):
+            raise AccountingError("Payment allocations cannot exceed the payment amount")
+        customer_credit = money(payment.amount - allocation_total)
+        if customer_credit > 0:
+            if data.customer_credit_account_id is None:
+                raise AccountingError(
+                    "Customer credit account is required when payment exceeds allocations"
+                )
+            self._posting_account(
+                data.customer_credit_account_id,
+                "LIABILITY",
+                "CUSTOMER_CREDIT",
+                "Customer credit",
+            )
 
         invoice_ids = sorted(
             (allocation.invoice_id for allocation in payment.allocations), key=str
@@ -712,7 +764,10 @@ class AccountingService:
         locked_invoices = list(
             self.session.scalars(
                 select(Invoice)
-                .where(Invoice.id.in_(invoice_ids))
+                .where(
+                    Invoice.owner_id == self.actor.id,
+                    Invoice.id.in_(invoice_ids),
+                )
                 .order_by(Invoice.id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
@@ -740,20 +795,40 @@ class AccountingService:
                     "Payment receivable account must match the invoice receivable account"
                 )
         period = self._period_for(payment.payment_date)
+        journal_lines = [
+            JournalLineCreate(
+                account_id=data.cash_account_id,
+                debit=payment.amount,
+                credit=Decimal("0"),
+            )
+        ]
+        if allocation_total > 0:
+            journal_lines.append(
+                JournalLineCreate(
+                    account_id=data.receivable_account_id,
+                    debit=Decimal("0"),
+                    credit=allocation_total,
+                )
+            )
+        if customer_credit > 0:
+            if data.customer_credit_account_id is None:  # guarded above; narrows the type
+                raise AccountingError(
+                    "Customer credit account is required when payment exceeds allocations"
+                )
+            journal_lines.append(
+                JournalLineCreate(
+                    account_id=data.customer_credit_account_id,
+                    debit=Decimal("0"),
+                    credit=customer_credit,
+                )
+            )
         journal = self.create_journal(
             JournalCreate(
                 entry_number=f"PAY-{payment.reference}",
                 entry_date=payment.payment_date,
                 description=f"Payment {payment.reference}",
                 period_id=period.id,
-                lines=[
-                    {"account_id": data.cash_account_id, "debit": payment.amount, "credit": 0},
-                    {
-                        "account_id": data.receivable_account_id,
-                        "debit": 0,
-                        "credit": payment.amount,
-                    },
-                ],
+                lines=journal_lines,
             ),
             commit=False,
         )
@@ -781,20 +856,28 @@ class AccountingService:
             raise ConflictError("Cleared checks are immutable")
         invoice = self._get_for_update(Invoice, check.invoice_id)
         if data.status != "CLEARED":
-            if data.cash_account_id is not None or data.cleared_date is not None:
+            if (
+                data.cash_account_id is not None
+                or data.customer_credit_account_id is not None
+                or data.cleared_date is not None
+            ):
                 raise AccountingError(
-                    "Cash account and cleared date are only valid when clearing a check"
+                    "Posting accounts and cleared date are only valid when clearing a check"
                 )
             check.status = data.status
             self._audit("accounting.invoice_check.updated", check)
             self._commit()
             return check
-        if invoice.status not in {"ISSUED", "PARTIALLY_PAID"}:
-            raise ConflictError("Only checks for issued unpaid invoices can be cleared")
+        if invoice.status not in {"ISSUED", "PARTIALLY_PAID", "PAID"}:
+            raise ConflictError("Only checks for issued invoices can be cleared")
         if data.cash_account_id is None or data.cleared_date is None:
             raise AccountingError("Cash account and cleared date are required")
-        if check.amount > invoice.balance_due:
-            raise AccountingError("Check amount exceeds the current invoice balance")
+        allocation_amount = min(check.amount, invoice.balance_due)
+        customer_credit = money(check.amount - allocation_amount)
+        if customer_credit > 0 and data.customer_credit_account_id is None:
+            raise AccountingError(
+                "Customer credit account is required when a check exceeds the invoice balance"
+            )
         if invoice.journal is None:
             raise ConflictError("Issued invoice journal is missing")
         receivable_ids = {
@@ -804,12 +887,19 @@ class AccountingService:
             raise ConflictError("Invoice receivable account is ambiguous")
         receivable_account_id = next(iter(receivable_ids))
         payment = Payment(
+            owner_id=self.actor.id,
             party_id=invoice.customer_id,
             payment_date=data.cleared_date,
             amount=check.amount,
-            reference=f"CHECK-{check.sayad_id}",
+            reference=f"CHECK-{check.sayad_id or check.id}",
             method="CHECK",
-            allocations=[PaymentAllocation(invoice_id=invoice.id, amount=check.amount)],
+            sayad_id=check.sayad_id,
+            customer_credit_account_id=data.customer_credit_account_id,
+            allocations=(
+                [PaymentAllocation(invoice_id=invoice.id, amount=allocation_amount)]
+                if allocation_amount > 0
+                else []
+            ),
         )
         self.session.add(payment)
         self._flush()
@@ -819,6 +909,7 @@ class AccountingService:
             PaymentPost(
                 cash_account_id=data.cash_account_id,
                 receivable_account_id=receivable_account_id,
+                customer_credit_account_id=data.customer_credit_account_id,
             ),
             commit=False,
         )
@@ -853,7 +944,9 @@ class AccountingService:
                 raise AccountingError("Allocation exceeds bill balance")
             allocations.append(BillPaymentAllocation(**value.model_dump()))
         payment = BillPayment(
-            **data.model_dump(exclude={"allocations"}), allocations=allocations
+            owner_id=self.actor.id,
+            **data.model_dump(exclude={"allocations"}),
+            allocations=allocations,
         )
         self.session.add(payment)
         self._flush()
@@ -874,7 +967,7 @@ class AccountingService:
         locked_bills = list(
             self.session.scalars(
                 select(Bill)
-                .where(Bill.id.in_(bill_ids))
+                .where(Bill.owner_id == self.actor.id, Bill.id.in_(bill_ids))
                 .order_by(Bill.id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
@@ -947,7 +1040,11 @@ class AccountingService:
         | type[Payment]
         | type[Product],
     ) -> list[object]:
-        return list(self.session.scalars(select(model)))
+        return list(
+            self.session.scalars(
+                select(model).where(model.owner_id == self.actor.id)
+            )
+        )
 
     def get(
         self,

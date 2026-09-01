@@ -123,11 +123,81 @@ class PartyTransaction(BaseModel):
     status: str
 
 
+class CustomerSummary(BaseModel):
+    party_id: UUID
+    name: str
+    email: str | None
+    phone: str | None
+    address: str | None
+    is_active: bool
+    purchase_count: int
+    total_purchased: Decimal
+    total_received: Decimal
+    receivable_balance: Decimal
+    customer_credit_balance: Decimal
+    net_balance: Decimal
+    balance_direction: str
+
+
+class CustomerPurchaseItem(BaseModel):
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    tax: Decimal
+    line_total: Decimal
+
+
+class CustomerCheckHistory(BaseModel):
+    check_id: UUID
+    amount: Decimal
+    sayad_id: str | None
+    due_date: date
+    status: str
+    cleared_date: date | None
+
+
+class CustomerInvoiceHistory(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    issue_date: date
+    due_date: date
+    status: str
+    subtotal: Decimal
+    tax: Decimal
+    total: Decimal
+    amount_paid: Decimal
+    balance_due: Decimal
+    items: list[CustomerPurchaseItem]
+    checks: list[CustomerCheckHistory]
+
+
+class CustomerPaymentHistory(BaseModel):
+    payment_id: UUID
+    reference: str
+    payment_date: date
+    amount: Decimal
+    method: str
+    sayad_id: str | None
+    status: str
+
+
 class PartyHistoryReport(BaseModel):
     party_id: UUID
     party_name: str
     start_date: date | None
     end_date: date | None
+    email: str | None
+    phone: str | None
+    address: str | None
+    purchase_count: int
+    total_purchased: Decimal
+    total_received: Decimal
+    receivable_balance: Decimal
+    customer_credit_balance: Decimal
+    net_balance: Decimal
+    balance_direction: str
+    invoices: list[CustomerInvoiceHistory]
+    payments: list[CustomerPaymentHistory]
     transactions: list[PartyTransaction]
 
 

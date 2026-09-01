@@ -196,7 +196,7 @@ class MLService:
     def payment_risk(
         self, invoice_id: UUID, as_of: date, actor: User
     ) -> tuple[MLPrediction, dict[str, Any]]:
-        invoice = self.repo.invoice(invoice_id)
+        invoice = self.repo.invoice(invoice_id, actor.id)
         if invoice is None:
             raise ModelNotFoundError("Invoice not found")
         if invoice.status not in {"ISSUED", "PARTIALLY_PAID"}:
@@ -206,7 +206,7 @@ class MLService:
         if invoice.issue_date > as_of:
             raise PredictionInputError("Invoice did not exist at the requested as-of date")
         features = self._payment_features(
-            invoice_id, invoice.customer_id, float(invoice.total), as_of
+            invoice_id, invoice.customer_id, float(invoice.total), as_of, actor.id
         )
         record, loaded = self._loaded("payment_delay_risk")
         result = cast(PaymentRiskModel, loaded).predict(features)
@@ -227,21 +227,28 @@ class MLService:
         )
         return prediction, {**value, "explanation": explanation, "scope": result.explanation_scope}
 
-    def _allocation_map(self, as_of: date) -> dict[UUID, list[tuple[date, float]]]:
+    def _allocation_map(
+        self, as_of: date, owner_id: UUID
+    ) -> dict[UUID, list[tuple[date, float]]]:
         values: dict[UUID, list[tuple[date, float]]] = defaultdict(list)
-        for allocation, payment in self.repo.posted_allocations(as_of):
+        for allocation, payment in self.repo.posted_allocations(as_of, owner_id):
             values[allocation.invoice_id].append((payment.payment_date, float(allocation.amount)))
         return values
 
     def _payment_features(
-        self, current_id: UUID, customer_id: UUID, amount: float, as_of: date
+        self,
+        current_id: UUID,
+        customer_id: UUID,
+        amount: float,
+        as_of: date,
+        owner_id: UUID,
     ) -> dict[str, float]:
         invoices = [
             item
-            for item in self.repo.customer_invoices(customer_id, as_of)
+            for item in self.repo.customer_invoices(customer_id, as_of, owner_id)
             if item.id != current_id
         ]
-        allocations = self._allocation_map(as_of)
+        allocations = self._allocation_map(as_of, owner_id)
         delays: list[float] = []
         paid_total = 0.0
         outstanding = 0.0
@@ -277,7 +284,7 @@ class MLService:
     ) -> tuple[MLPrediction, list[dict[str, Any]]]:
         record, loaded = self._loaded("cash_flow_forecast")
         model = cast(CashFlowModel, loaded)
-        payments = self.repo.posted_payments(as_of)
+        payments = self.repo.posted_payments(as_of, actor.id)
         daily: dict[date, float] = defaultdict(float)
         for payment in payments:
             daily[payment.payment_date] += float(payment.amount)
@@ -315,13 +322,13 @@ class MLService:
     def segment_customer(
         self, party_id: UUID, as_of: date, actor: User
     ) -> tuple[MLPrediction, dict[str, Any]]:
-        party = self.repo.customer(party_id)
+        party = self.repo.customer(party_id, actor.id)
         if party is None:
             raise ModelNotFoundError("Customer not found")
-        invoices = self.repo.customer_invoices(party_id, as_of)
+        invoices = self.repo.customer_invoices(party_id, as_of, actor.id)
         if not invoices:
             raise PredictionInputError("Customer has no eligible invoice history")
-        allocations = self._allocation_map(as_of)
+        allocations = self._allocation_map(as_of, actor.id)
         total = sum(float(item.total) for item in invoices)
         paid = sum(sum(value for _, value in allocations.get(item.id, [])) for item in invoices)
         delays: list[float] = []
@@ -355,11 +362,13 @@ class MLService:
         )
         return prediction, value
 
-    def predictions(self, pipeline: str | None = None) -> list[MLPrediction]:
-        return self.repo.predictions(pipeline)
+    def predictions(
+        self, actor: User, pipeline: str | None = None
+    ) -> list[MLPrediction]:
+        return self.repo.predictions(actor.id, pipeline)
 
-    def prediction(self, prediction_id: UUID) -> MLPrediction:
-        prediction = self.repo.prediction(prediction_id)
+    def prediction(self, prediction_id: UUID, actor: User) -> MLPrediction:
+        prediction = self.repo.prediction(prediction_id, actor.id)
         if prediction is None:
             raise ModelNotFoundError("Prediction not found")
         return prediction
@@ -367,7 +376,7 @@ class MLService:
     def submit_feedback(
         self, prediction_id: UUID, data: FeedbackRequest, actor: User
     ) -> MLPredictionFeedback:
-        if self.repo.prediction(prediction_id) is None:
+        if self.repo.prediction(prediction_id, actor.id) is None:
             raise ModelNotFoundError("Prediction not found")
         feedback = MLPredictionFeedback(
             prediction_id=prediction_id,

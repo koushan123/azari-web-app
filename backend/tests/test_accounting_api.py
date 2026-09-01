@@ -7,12 +7,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 
-def admin_headers(client: TestClient) -> dict[str, str]:
+def headers_for_admin(
+    client: TestClient, email: str = "stage3-admin@example.com"
+) -> dict[str, str]:
     with SessionLocal.begin() as session:
         admin = session.scalar(select(Role).where(Role.name == "ADMIN"))
         session.add(
             User(
-                email="stage3-admin@example.com",
+                email=email,
                 password_hash=hash_password("stage-three-password"),
                 first_name="Stage",
                 last_name="Admin",
@@ -21,9 +23,71 @@ def admin_headers(client: TestClient) -> dict[str, str]:
         )
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "stage3-admin@example.com", "password": "stage-three-password"},
+        json={"email": email, "password": "stage-three-password"},
     )
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def admin_headers(client: TestClient) -> dict[str, str]:
+    return headers_for_admin(client)
+
+
+def test_registered_users_have_private_accounting_workspaces(client: TestClient) -> None:
+    first = headers_for_admin(client, "owner-one@example.com")
+    second = headers_for_admin(client, "owner-two@example.com")
+
+    first_party = client.post(
+        "/api/v1/parties",
+        headers=first,
+        json={"name": "Shared-looking customer", "is_customer": True},
+    )
+    assert first_party.status_code == 201
+    second_party = client.post(
+        "/api/v1/parties",
+        headers=second,
+        json={"name": "Shared-looking customer", "is_customer": True},
+    )
+    assert second_party.status_code == 201
+    assert first_party.json()["id"] != second_party.json()["id"]
+
+    first_list = client.get("/api/v1/parties", headers=first).json()
+    second_list = client.get("/api/v1/parties", headers=second).json()
+    assert [item["id"] for item in first_list] == [first_party.json()["id"]]
+    assert [item["id"] for item in second_list] == [second_party.json()["id"]]
+    assert (
+        client.get(
+            f"/api/v1/parties/{first_party.json()['id']}", headers=second
+        ).status_code
+        == 404
+    )
+
+    for headers in (first, second):
+        category = client.post(
+            "/api/v1/account-categories",
+            headers=headers,
+            json={"name": "Assets", "account_type": "ASSET"},
+        )
+        assert category.status_code == 201
+        period = client.post(
+            "/api/v1/periods",
+            headers=headers,
+            json={
+                "name": "2026",
+                "start_date": "2026-01-01",
+                "end_date": "2026-12-31",
+            },
+        )
+        assert period.status_code == 201
+
+    first_customers = client.get("/api/v1/reports/customers", headers=first)
+    second_customers = client.get("/api/v1/reports/customers", headers=second)
+    assert first_customers.status_code == second_customers.status_code == 200
+    assert [item["party_id"] for item in first_customers.json()] == [
+        first_party.json()["id"]
+    ]
+    assert [item["party_id"] for item in second_customers.json()] == [
+        second_party.json()["id"]
+    ]
 
 
 def test_accounting_api_requires_authentication_and_permission(client: TestClient) -> None:
@@ -198,12 +262,14 @@ def test_supplier_bill_and_payment_api_workflow_and_reversal_protection(
             "payment_date": "2026-03-15",
             "amount": "110",
             "reference": "API-BP-1",
-            "method": "bank",
+            "method": "check",
+            "sayad_id": "OPTIONAL-BILL-SAYAD",
             "allocations": [{"bill_id": bill["id"], "amount": "110"}],
         },
     )
     assert created_payment.status_code == 201, created_payment.text
     payment = created_payment.json()
+    assert payment["sayad_id"] == "OPTIONAL-BILL-SAYAD"
     assert client.get("/api/v1/bill-payments", headers=headers).status_code == 200
     assert (
         client.get(f"/api/v1/bill-payments/{payment['id']}", headers=headers).status_code == 200

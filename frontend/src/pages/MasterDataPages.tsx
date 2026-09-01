@@ -14,11 +14,12 @@ const POSTING_ROLE_LABELS = {
   TAX_LIABILITY: "بدهی مالیات",
   PAYABLE: "پرداختنی تجاری",
   EXPENSE: "هزینه خرید",
+  CUSTOMER_CREDIT: "اعتبار مشتری",
 } as const;
 
 const POSTING_ROLES_BY_ACCOUNT_TYPE: Record<AccountCategory["account_type"], Array<keyof typeof POSTING_ROLE_LABELS>> = {
   ASSET: ["GENERAL", "CASH", "RECEIVABLE"],
-  LIABILITY: ["GENERAL", "TAX_LIABILITY", "PAYABLE"],
+  LIABILITY: ["GENERAL", "TAX_LIABILITY", "PAYABLE", "CUSTOMER_CREDIT"],
   EQUITY: ["GENERAL"],
   REVENUE: ["GENERAL", "REVENUE"],
   EXPENSE: ["GENERAL", "EXPENSE"],

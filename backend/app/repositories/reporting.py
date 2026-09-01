@@ -21,8 +21,9 @@ from backend.app.db.models import (
 
 
 class ReportingRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, owner_id: UUID) -> None:
         self.session = session
+        self.owner_id = owner_id
 
     def account_activity(
         self,
@@ -41,7 +42,11 @@ class ReportingRepository:
             .join(Account.category)
             .join(JournalLine, JournalLine.account_id == Account.id)
             .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
-            .where(JournalEntry.status == "POSTED")
+            .where(
+                Account.owner_id == self.owner_id,
+                JournalEntry.owner_id == self.owner_id,
+                JournalEntry.status == "POSTED",
+            )
             .group_by(Account.id, AccountCategory.account_type)
             .order_by(Account.code)
         )
@@ -76,6 +81,7 @@ class ReportingRepository:
             .outerjoin(PaymentAllocation, PaymentAllocation.invoice_id == Invoice.id)
             .outerjoin(Payment, Payment.id == PaymentAllocation.payment_id)
             .where(
+                Invoice.owner_id == self.owner_id,
                 Invoice.issue_date <= as_of,
                 Invoice.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
             )
@@ -106,6 +112,7 @@ class ReportingRepository:
             .outerjoin(BillPaymentAllocation, BillPaymentAllocation.bill_id == Bill.id)
             .outerjoin(BillPayment, BillPayment.id == BillPaymentAllocation.bill_payment_id)
             .where(
+                Bill.owner_id == self.owner_id,
                 Bill.issue_date <= as_of,
                 Bill.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
             )
@@ -116,12 +123,42 @@ class ReportingRepository:
         return [(row[0], Decimal(row[1])) for row in self.session.execute(statement)]
 
     def party(self, party_id: UUID) -> Party | None:
-        return self.session.get(Party, party_id)
+        return self.session.scalar(
+            select(Party).where(Party.id == party_id, Party.owner_id == self.owner_id)
+        )
+
+    def customers(self) -> list[Party]:
+        return list(
+            self.session.scalars(
+                select(Party)
+                .where(
+                    Party.owner_id == self.owner_id,
+                    Party.is_customer.is_(True),
+                )
+                .order_by(Party.name, Party.id)
+            )
+        )
+
+    def customer_accounting_invoices(self, party_id: UUID) -> list[Invoice]:
+        return list(
+            self.session.scalars(
+                select(Invoice)
+                .where(
+                    Invoice.owner_id == self.owner_id,
+                    Invoice.customer_id == party_id,
+                    Invoice.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
+                )
+                .order_by(Invoice.issue_date, Invoice.id)
+            )
+        )
 
     def party_invoices(
         self, party_id: UUID, start_date: date | None, end_date: date | None
     ) -> list[Invoice]:
-        statement = select(Invoice).where(Invoice.customer_id == party_id)
+        statement = select(Invoice).where(
+            Invoice.owner_id == self.owner_id,
+            Invoice.customer_id == party_id,
+        )
         if start_date is not None:
             statement = statement.where(Invoice.issue_date >= start_date)
         if end_date is not None:
@@ -131,17 +168,41 @@ class ReportingRepository:
     def party_payments(
         self, party_id: UUID, start_date: date | None, end_date: date | None
     ) -> list[Payment]:
-        statement = select(Payment).where(Payment.party_id == party_id)
+        statement = select(Payment).where(
+            Payment.owner_id == self.owner_id,
+            Payment.party_id == party_id,
+        )
         if start_date is not None:
             statement = statement.where(Payment.payment_date >= start_date)
         if end_date is not None:
             statement = statement.where(Payment.payment_date <= end_date)
         return list(self.session.scalars(statement))
 
+    def customer_credit_balance(self, party_id: UUID) -> Decimal:
+        balance = self.session.scalar(
+            select(func.coalesce(func.sum(JournalLine.credit - JournalLine.debit), 0))
+            .join(Account, Account.id == JournalLine.account_id)
+            .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
+            .join(Payment, Payment.journal_id == JournalEntry.id)
+            .where(
+                Payment.party_id == party_id,
+                Payment.owner_id == self.owner_id,
+                JournalEntry.owner_id == self.owner_id,
+                Account.owner_id == self.owner_id,
+                Payment.status == "POSTED",
+                JournalEntry.status == "POSTED",
+                Account.posting_role == "CUSTOMER_CREDIT",
+            )
+        )
+        return Decimal(balance or 0)
+
     def posted_payments(
         self, start_date: date | None = None, end_date: date | None = None
     ) -> list[Payment]:
-        statement = select(Payment).where(Payment.status == "POSTED")
+        statement = select(Payment).where(
+            Payment.owner_id == self.owner_id,
+            Payment.status == "POSTED",
+        )
         if start_date is not None:
             statement = statement.where(Payment.payment_date >= start_date)
         if end_date is not None:
@@ -151,7 +212,10 @@ class ReportingRepository:
     def posted_bill_payments(
         self, start_date: date | None = None, end_date: date | None = None
     ) -> list[BillPayment]:
-        statement = select(BillPayment).where(BillPayment.status == "POSTED")
+        statement = select(BillPayment).where(
+            BillPayment.owner_id == self.owner_id,
+            BillPayment.status == "POSTED",
+        )
         if start_date is not None:
             statement = statement.where(BillPayment.payment_date >= start_date)
         if end_date is not None:

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -91,7 +91,7 @@ class AccountCreate(BaseModel):
     parent_id: UUID | None = None
     posting_role: str = Field(
         default="GENERAL",
-        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE)$",
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE|CUSTOMER_CREDIT)$",
     )
 
 
@@ -102,7 +102,7 @@ class AccountUpdate(BaseModel):
     is_active: bool | None = None
     posting_role: str | None = Field(
         default=None,
-        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE)$",
+        pattern="^(GENERAL|CASH|RECEIVABLE|REVENUE|TAX_LIABILITY|PAYABLE|EXPENSE|CUSTOMER_CREDIT)$",
     )
 
 
@@ -176,9 +176,14 @@ class InvoiceCheckCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
-    sayad_id: str = Field(min_length=1, max_length=32)
+    sayad_id: str | None = Field(default=None, max_length=32)
     due_date: date
     status: str = Field(default="PENDING", pattern="^(PENDING|BOUNCED)$")
+
+    @field_validator("sayad_id", mode="before")
+    @classmethod
+    def empty_sayad_is_none(cls, value: object) -> object:
+        return value.strip() or None if isinstance(value, str) else value
 
 
 class InvoiceCreate(BaseModel):
@@ -208,7 +213,7 @@ class InvoiceItemRead(ORMModel):
 class InvoiceCheckRead(ORMModel):
     id: UUID
     amount: Decimal
-    sayad_id: str
+    sayad_id: str | None
     due_date: date
     status: str
     cleared_date: date | None
@@ -230,6 +235,7 @@ class InvoiceRead(ORMModel):
     journal_id: UUID | None
     items: list[InvoiceItemRead]
     checks: list[InvoiceCheckRead]
+    created_at: datetime
 
     balance_due: Decimal
 
@@ -243,6 +249,7 @@ class InvoiceIssue(BaseModel):
 class InvoiceCheckUpdate(BaseModel):
     status: str = Field(pattern="^(PENDING|CLEARED|BOUNCED)$")
     cash_account_id: UUID | None = None
+    customer_credit_account_id: UUID | None = None
     cleared_date: date | None = None
 
 
@@ -257,7 +264,14 @@ class PaymentCreate(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     reference: str = Field(min_length=1, max_length=100)
     method: str = Field(min_length=1, max_length=50)
+    sayad_id: str | None = Field(default=None, max_length=100)
+    customer_credit_account_id: UUID | None = None
     allocations: list[AllocationCreate] = Field(min_length=1)
+
+    @field_validator("sayad_id", mode="before")
+    @classmethod
+    def empty_sayad_is_none(cls, value: object) -> object:
+        return value.strip() or None if isinstance(value, str) else value
 
 
 class AllocationRead(ORMModel):
@@ -273,6 +287,8 @@ class PaymentRead(ORMModel):
     amount: Decimal
     reference: str
     method: str
+    sayad_id: str | None
+    customer_credit_account_id: UUID | None
     status: str
     journal_id: UUID | None
     allocations: list[AllocationRead]
@@ -281,6 +297,7 @@ class PaymentRead(ORMModel):
 class PaymentPost(BaseModel):
     cash_account_id: UUID
     receivable_account_id: UUID
+    customer_credit_account_id: UUID | None = None
 
 
 class BillItemCreate(BaseModel):
@@ -342,7 +359,13 @@ class BillPaymentCreate(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     reference: str = Field(min_length=1, max_length=100)
     method: str = Field(min_length=1, max_length=50)
+    sayad_id: str | None = Field(default=None, max_length=100)
     allocations: list[BillPaymentAllocationCreate] = Field(min_length=1)
+
+    @field_validator("sayad_id", mode="before")
+    @classmethod
+    def empty_sayad_is_none(cls, value: object) -> object:
+        return value.strip() or None if isinstance(value, str) else value
 
 
 class BillPaymentAllocationRead(ORMModel):
@@ -358,6 +381,7 @@ class BillPaymentRead(ORMModel):
     amount: Decimal
     reference: str
     method: str
+    sayad_id: str | None
     status: str
     journal_id: UUID | None
     allocations: list[BillPaymentAllocationRead]

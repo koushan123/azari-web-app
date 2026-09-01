@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from backend.app.db.models import Account
+from backend.app.db.models import Account, Party
 from backend.app.repositories.reporting import ReportingRepository
 from backend.app.schemas.reporting import (
     AccountReportLine,
@@ -13,6 +13,11 @@ from backend.app.schemas.reporting import (
     BalanceSheetReport,
     CashFlowPoint,
     CashFlowReport,
+    CustomerCheckHistory,
+    CustomerInvoiceHistory,
+    CustomerPaymentHistory,
+    CustomerPurchaseItem,
+    CustomerSummary,
     DashboardReport,
     IncomeStatementReport,
     PartyHistoryReport,
@@ -29,8 +34,8 @@ ZERO = Decimal("0.00")
 
 
 class ReportingService:
-    def __init__(self, session: Session) -> None:
-        self.repo = ReportingRepository(session)
+    def __init__(self, session: Session, owner_id: UUID) -> None:
+        self.repo = ReportingRepository(session, owner_id)
 
     @staticmethod
     def _validate_range(start_date: date | None, end_date: date | None) -> None:
@@ -229,6 +234,45 @@ class ReportingService:
             net_cash_flow=money(total_inflow - total_outflow),
         )
 
+    @staticmethod
+    def _balance_direction(net_balance: Decimal) -> str:
+        if net_balance > 0:
+            return "CUSTOMER_OWES"
+        if net_balance < 0:
+            return "BUSINESS_OWES"
+        return "SETTLED"
+
+    def _customer_summary(self, party: Party) -> CustomerSummary:
+        invoices = self.repo.customer_accounting_invoices(party.id)
+        posted_payments = [
+            payment
+            for payment in self.repo.party_payments(party.id, None, None)
+            if payment.status == "POSTED"
+        ]
+        total_purchased = money(sum((invoice.total for invoice in invoices), ZERO))
+        total_received = money(sum((payment.amount for payment in posted_payments), ZERO))
+        receivable = money(sum((invoice.balance_due for invoice in invoices), ZERO))
+        credit = money(self.repo.customer_credit_balance(party.id))
+        net = money(receivable - credit)
+        return CustomerSummary(
+            party_id=party.id,
+            name=party.name,
+            email=party.email,
+            phone=party.phone,
+            address=party.address,
+            is_active=party.is_active,
+            purchase_count=len(invoices),
+            total_purchased=total_purchased,
+            total_received=total_received,
+            receivable_balance=receivable,
+            customer_credit_balance=credit,
+            net_balance=net,
+            balance_direction=self._balance_direction(net),
+        )
+
+    def customers(self) -> list[CustomerSummary]:
+        return [self._customer_summary(party) for party in self.repo.customers()]
+
     def party_history(
         self,
         party_id: UUID,
@@ -237,8 +281,11 @@ class ReportingService:
     ) -> PartyHistoryReport:
         self._validate_range(start_date, end_date)
         party = self.repo.party(party_id)
-        if party is None:
-            raise NotFoundError("Party not found")
+        if party is None or not party.is_customer:
+            raise NotFoundError("Customer not found")
+        summary = self._customer_summary(party)
+        invoices = self.repo.party_invoices(party_id, start_date, end_date)
+        payments = self.repo.party_payments(party_id, start_date, end_date)
         transactions = [
             PartyTransaction(
                 kind="INVOICE",
@@ -248,7 +295,7 @@ class ReportingService:
                 amount=item.total,
                 status=item.status,
             )
-            for item in self.repo.party_invoices(party_id, start_date, end_date)
+            for item in invoices
         ]
         transactions.extend(
             PartyTransaction(
@@ -259,7 +306,7 @@ class ReportingService:
                 amount=item.amount,
                 status=item.status,
             )
-            for item in self.repo.party_payments(party_id, start_date, end_date)
+            for item in payments
         )
         transactions.sort(key=lambda item: (item.date, item.kind, item.reference))
         return PartyHistoryReport(
@@ -267,6 +314,64 @@ class ReportingService:
             party_name=party.name,
             start_date=start_date,
             end_date=end_date,
+            email=party.email,
+            phone=party.phone,
+            address=party.address,
+            purchase_count=summary.purchase_count,
+            total_purchased=summary.total_purchased,
+            total_received=summary.total_received,
+            receivable_balance=summary.receivable_balance,
+            customer_credit_balance=summary.customer_credit_balance,
+            net_balance=summary.net_balance,
+            balance_direction=summary.balance_direction,
+            invoices=[
+                CustomerInvoiceHistory(
+                    invoice_id=invoice.id,
+                    invoice_number=invoice.invoice_number,
+                    issue_date=invoice.issue_date,
+                    due_date=invoice.due_date,
+                    status=invoice.status,
+                    subtotal=invoice.subtotal,
+                    tax=invoice.tax,
+                    total=invoice.total,
+                    amount_paid=invoice.amount_paid,
+                    balance_due=invoice.balance_due,
+                    items=[
+                        CustomerPurchaseItem(
+                            description=item.description,
+                            quantity=item.quantity,
+                            unit_price=item.unit_price,
+                            tax=item.tax,
+                            line_total=item.line_total,
+                        )
+                        for item in invoice.items
+                    ],
+                    checks=[
+                        CustomerCheckHistory(
+                            check_id=check.id,
+                            amount=check.amount,
+                            sayad_id=check.sayad_id,
+                            due_date=check.due_date,
+                            status=check.status,
+                            cleared_date=check.cleared_date,
+                        )
+                        for check in invoice.checks
+                    ],
+                )
+                for invoice in invoices
+            ],
+            payments=[
+                CustomerPaymentHistory(
+                    payment_id=payment.id,
+                    reference=payment.reference,
+                    payment_date=payment.payment_date,
+                    amount=payment.amount,
+                    method=payment.method,
+                    sayad_id=payment.sayad_id,
+                    status=payment.status,
+                )
+                for payment in payments
+            ],
             transactions=transactions,
         )
 

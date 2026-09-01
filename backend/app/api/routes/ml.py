@@ -160,21 +160,21 @@ def customer_segmentation(
 def prediction_history(
     session: SessionDep,
     settings: SettingsDep,
-    _: MLReader,
+    actor: MLReader,
     pipeline: PipelineName | None = None,
 ) -> list[PredictionHistoryResponse]:
     return [
         PredictionHistoryResponse.model_validate(item)
-        for item in MLService(session, settings).predictions(pipeline)
+        for item in MLService(session, settings).predictions(actor, pipeline)
     ]
 
 
 @router.get("/predictions/{prediction_id}", response_model=PredictionHistoryResponse)
 def prediction_detail(
-    prediction_id: UUID, session: SessionDep, settings: SettingsDep, _: MLReader
+    prediction_id: UUID, session: SessionDep, settings: SettingsDep, actor: MLReader
 ) -> PredictionHistoryResponse:
     return PredictionHistoryResponse.model_validate(
-        MLService(session, settings).prediction(prediction_id)
+        MLService(session, settings).prediction(prediction_id, actor)
     )
 
 

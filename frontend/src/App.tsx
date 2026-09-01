@@ -5,6 +5,7 @@ import { AppLayout } from "./layouts/AppLayout";
 import { SettingsPage, UsersPage } from "./pages/AdminPages";
 import { AiDashboardPage, ClassificationPage, ForecastPage, ModelsPage, RiskPage, SegmentsPage } from "./pages/AiPages";
 import { DashboardPage } from "./pages/DashboardPage";
+import { CustomersPage } from "./pages/CustomersPage";
 import { BillPaymentsPage, BillsPage } from "./pages/BillsPages";
 import { LoginPage, RegisterPage } from "./pages/LoginPage";
 import { AccountsPage, PartiesPage, PeriodsPage, ProductsPage } from "./pages/MasterDataPages";
@@ -14,7 +15,7 @@ import { Link, useRouter } from "./routes/router";
 import "./styles.css";
 interface Route { path: string; component: () => React.JSX.Element; permission?: string; prefix?: boolean }
 export const routes: Route[] = [
-  { path: "/dashboard", component: DashboardPage, permission: "reports:read" }, { path: "/parties", component: PartiesPage, permission: "parties:read" }, { path: "/products", component: ProductsPage, permission: "products:read" }, { path: "/accounts", component: AccountsPage, permission: "accounts:read" }, { path: "/periods", component: PeriodsPage, permission: "periods:read" }, { path: "/journals", component: JournalsPage, permission: "journals:read" }, { path: "/invoices", component: InvoicesPage, permission: "invoices:read" }, { path: "/payments", component: PaymentsPage, permission: "payments:read" },
+  { path: "/dashboard", component: DashboardPage, permission: "reports:read" }, { path: "/customers", component: CustomersPage, permission: "reports:read" }, { path: "/parties", component: PartiesPage, permission: "parties:read" }, { path: "/products", component: ProductsPage, permission: "products:read" }, { path: "/accounts", component: AccountsPage, permission: "accounts:read" }, { path: "/periods", component: PeriodsPage, permission: "periods:read" }, { path: "/journals", component: JournalsPage, permission: "journals:read" }, { path: "/invoices", component: InvoicesPage, permission: "invoices:read" }, { path: "/payments", component: PaymentsPage, permission: "payments:read" },
   { path: "/bills", component: BillsPage, permission: "bills:read" }, { path: "/bill-payments", component: BillPaymentsPage, permission: "bill_payments:read" },
   { path: "/reports/", component: ReportsPage, permission: "reports:read", prefix: true }, { path: "/ai", component: AiDashboardPage, permission: "ml:read" }, { path: "/ai/classification", component: ClassificationPage, permission: "ml:predict" }, { path: "/ai/risk", component: RiskPage, permission: "ml:predict" }, { path: "/ai/forecast", component: ForecastPage, permission: "ml:predict" }, { path: "/ai/segments", component: SegmentsPage, permission: "ml:predict" }, { path: "/ai/models", component: ModelsPage, permission: "ml:manage" }, { path: "/users", component: UsersPage, permission: "users:read" }, { path: "/settings", component: SettingsPage },
 ];

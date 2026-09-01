@@ -58,6 +58,7 @@ class Domain:
     receivable: Account
     revenue: Account
     tax_liability: Account
+    customer_credit: Account
     payable: Account
     expense: Account
     period: FinancialPeriod
@@ -74,36 +75,75 @@ def domain(session: Session) -> tuple[AccountingService, Domain]:
         last_name="Three",
         roles=[session.scalar(select(Role).where(Role.name == "ADMIN"))],
     )
-    asset = AccountCategory(name="Assets", account_type="ASSET")
-    revenue_category = AccountCategory(name="Revenue", account_type="REVENUE")
-    liability = AccountCategory(name="Liabilities", account_type="LIABILITY")
-    expense_category = AccountCategory(name="Purchase expenses", account_type="EXPENSE")
-    session.add_all([admin, asset, revenue_category, liability, expense_category])
+    session.add(admin)
     session.flush()
-    cash = Account(code="1000", name="Cash", category=asset, posting_role="CASH")
+    asset = AccountCategory(owner_id=admin.id, name="Assets", account_type="ASSET")
+    revenue_category = AccountCategory(
+        owner_id=admin.id, name="Revenue", account_type="REVENUE"
+    )
+    liability = AccountCategory(
+        owner_id=admin.id, name="Liabilities", account_type="LIABILITY"
+    )
+    expense_category = AccountCategory(
+        owner_id=admin.id, name="Purchase expenses", account_type="EXPENSE"
+    )
+    session.add_all([asset, revenue_category, liability, expense_category])
+    cash = Account(
+        owner_id=admin.id,
+        code="1000",
+        name="Cash",
+        category=asset,
+        posting_role="CASH",
+    )
     receivable = Account(
+        owner_id=admin.id,
         code="1100", name="Receivable", category=asset, posting_role="RECEIVABLE"
     )
     revenue = Account(
+        owner_id=admin.id,
         code="4000", name="Sales", category=revenue_category, posting_role="REVENUE"
     )
     tax_liability = Account(
+        owner_id=admin.id,
         code="2100", name="Tax payable", category=liability, posting_role="TAX_LIABILITY"
     )
-    payable = Account(code="2000", name="Payable", category=liability, posting_role="PAYABLE")
+    customer_credit = Account(
+        owner_id=admin.id,
+        code="2200", name="Customer credit", category=liability, posting_role="CUSTOMER_CREDIT"
+    )
+    payable = Account(
+        owner_id=admin.id,
+        code="2000",
+        name="Payable",
+        category=liability,
+        posting_role="PAYABLE",
+    )
     expense = Account(
+        owner_id=admin.id,
         code="5050", name="Purchases", category=expense_category, posting_role="EXPENSE"
     )
-    period = FinancialPeriod(name="2026", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31))
-    customer = Party(name="Customer", is_customer=True)
-    supplier = Party(name="Supplier", is_supplier=True)
-    product = Product(sku="P-1", name="Service", unit="hour", unit_price=Decimal("100.00"))
+    period = FinancialPeriod(
+        owner_id=admin.id,
+        name="2026",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+    )
+    customer = Party(owner_id=admin.id, name="Customer", is_customer=True)
+    supplier = Party(owner_id=admin.id, name="Supplier", is_supplier=True)
+    product = Product(
+        owner_id=admin.id,
+        sku="P-1",
+        name="Service",
+        unit="hour",
+        unit_price=Decimal("100.00"),
+    )
     session.add_all(
         [
             cash,
             receivable,
             revenue,
             tax_liability,
+            customer_credit,
             payable,
             expense,
             period,
@@ -119,6 +159,7 @@ def domain(session: Session) -> tuple[AccountingService, Domain]:
         receivable,
         revenue,
         tax_liability,
+        customer_credit,
         payable,
         expense,
         period,
@@ -350,6 +391,7 @@ def test_invoice_issue_rejects_broad_category_accounts_without_semantic_roles() 
     with SessionLocal() as session:
         service, values = domain(session)
         generic_asset = Account(
+            owner_id=values.admin.id,
             code="1200", name="Generic asset", category=values.receivable.category
         )
         session.add(generic_asset)
@@ -425,7 +467,7 @@ def test_typed_customer_and_check_details_are_persisted_and_validated() -> None:
             ),
             InvoiceCheckCreate(
                 amount=Decimal("175"),
-                sayad_id="SAYAD-002",
+                sayad_id=None,
                 due_date=date(2026, 3, 1),
                 status="BOUNCED",
             ),
@@ -436,20 +478,144 @@ def test_typed_customer_and_check_details_are_persisted_and_validated() -> None:
         assert invoice.customer.name == "مشتری جدید"
         assert invoice.customer.is_customer
         assert invoice.payment_method == "CHECK"
-        assert [check.sayad_id for check in invoice.checks] == ["SAYAD-001", "SAYAD-002"]
+        assert [check.sayad_id for check in invoice.checks] == ["SAYAD-001", None]
         assert sum(check.amount for check in invoice.checks) == invoice.total
 
-        invalid = invoice_data(values, "I-BAD-CHECKS")
-        invalid.payment_method = "CHECK"
-        invalid.checks = [
+        underpaid = invoice_data(values, "I-PARTIAL-CHECKS")
+        underpaid.payment_method = "CHECK"
+        underpaid.checks = [
             InvoiceCheckCreate(
-                amount=Decimal("1"),
+                amount=Decimal("200"),
                 sayad_id="SAYAD-003",
                 due_date=date(2026, 3, 1),
             )
         ]
-        with pytest.raises(AccountingError, match="must equal"):
-            service.create_invoice(invalid)
+        partial_invoice = service.create_invoice(underpaid)
+        assert sum(check.amount for check in partial_invoice.checks) == Decimal(
+            "200.00"
+        )
+        assert partial_invoice.total == Decimal("275.00")
+
+
+def test_underpaid_invoice_check_leaves_customer_receivable_balance() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        data = invoice_data(values, "I-UNDERPAID-CHECK")
+        data.payment_method = "CHECK"
+        data.checks = [
+            InvoiceCheckCreate(
+                amount=Decimal("200"),
+                sayad_id="UNDERPAID-001",
+                due_date=date(2026, 2, 15),
+            )
+        ]
+        invoice = service.create_invoice(data)
+        issued = service.issue_invoice(
+            invoice.id,
+            InvoiceIssue(
+                receivable_account_id=values.receivable.id,
+                revenue_account_id=values.revenue.id,
+                tax_liability_account_id=values.tax_liability.id,
+            ),
+        )
+
+        cleared = service.update_invoice_check(
+            issued.checks[0].id,
+            InvoiceCheckUpdate(
+                status="CLEARED",
+                cash_account_id=values.cash.id,
+                cleared_date=date(2026, 2, 20),
+            ),
+        )
+        payment = session.get(Payment, cleared.cleared_payment_id)
+        assert payment is not None and payment.journal is not None
+        assert payment.amount == Decimal("200.00")
+        assert all(
+            line.account_id != values.customer_credit.id
+            for line in payment.journal.lines
+        )
+        session.refresh(issued)
+        assert issued.amount_paid == Decimal("200.00")
+        assert issued.balance_due == Decimal("75.00")
+        assert issued.status == "PARTIALLY_PAID"
+
+
+def test_overpaid_invoice_check_posts_customer_credit_only_when_cleared() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        data = invoice_data(values, "I-OVERPAID-CHECK")
+        data.payment_method = "CHECK"
+        data.checks = [
+            InvoiceCheckCreate(
+                amount=Decimal("300"),
+                sayad_id="",
+                due_date=date(2026, 2, 15),
+            )
+        ]
+        invoice = service.create_invoice(data)
+        assert invoice.checks[0].sayad_id is None
+        assert invoice.amount_paid == 0
+
+        issued = service.issue_invoice(
+            invoice.id,
+            InvoiceIssue(
+                receivable_account_id=values.receivable.id,
+                revenue_account_id=values.revenue.id,
+                tax_liability_account_id=values.tax_liability.id,
+            ),
+        )
+        assert issued.journal is not None
+        issue_credits = {
+            line.account_id: line.credit
+            for line in issued.journal.lines
+            if line.credit > 0
+        }
+        assert issue_credits == {
+            values.revenue.id: issued.subtotal,
+            values.tax_liability.id: issued.tax,
+        }
+
+        check = issued.checks[0]
+        with pytest.raises(AccountingError, match="Customer credit account is required"):
+            service.update_invoice_check(
+                check.id,
+                InvoiceCheckUpdate(
+                    status="CLEARED",
+                    cash_account_id=values.cash.id,
+                    cleared_date=date(2026, 2, 20),
+                ),
+            )
+
+        cleared = service.update_invoice_check(
+            check.id,
+            InvoiceCheckUpdate(
+                status="CLEARED",
+                cash_account_id=values.cash.id,
+                customer_credit_account_id=values.customer_credit.id,
+                cleared_date=date(2026, 2, 20),
+            ),
+        )
+        payment = session.get(Payment, cleared.cleared_payment_id)
+        assert payment is not None and payment.journal is not None
+        debits = {
+            line.account_id: line.debit
+            for line in payment.journal.lines
+            if line.debit > 0
+        }
+        credits = {
+            line.account_id: line.credit
+            for line in payment.journal.lines
+            if line.credit > 0
+        }
+        assert debits == {values.cash.id: Decimal("300.00")}
+        assert credits == {
+            values.receivable.id: Decimal("275.00"),
+            values.customer_credit.id: Decimal("25.00"),
+        }
+        assert sum(debits.values()) == sum(credits.values())
+        session.refresh(issued)
+        assert issued.amount_paid == issued.total
+        assert issued.status == "PAID"
 
 
 def test_only_cleared_check_posts_payment_and_cleared_check_is_immutable() -> None:
@@ -630,6 +796,7 @@ def test_payment_post_requires_distinct_accounts_and_matching_invoice_receivable
                 ),
             )
         other_receivable = Account(
+            owner_id=values.admin.id,
             code="1199",
             name="Other receivable",
             category=values.receivable.category,
@@ -650,6 +817,54 @@ def test_payment_post_requires_distinct_accounts_and_matching_invoice_receivable
         session.refresh(invoice)
         assert payment.status == "DRAFT" and payment.journal_id is None
         assert invoice.amount_paid == 0 and invoice.status == "ISSUED"
+
+
+def test_customer_overpayment_posts_receivable_and_credit_liability() -> None:
+    with SessionLocal() as session:
+        service, values = domain(session)
+        invoice = post_invoice(service, values)
+        payment = service.create_payment(
+            PaymentCreate(
+                party_id=values.customer.id,
+                payment_date=date(2026, 2, 5),
+                amount=Decimal("300"),
+                reference="OVERPAYMENT",
+                method="check",
+                sayad_id="OPTIONAL-SAYAD",
+                allocations=[{"invoice_id": invoice.id, "amount": invoice.total}],
+            )
+        )
+
+        with pytest.raises(AccountingError, match="Customer credit account is required"):
+            service.post_payment(
+                payment.id,
+                PaymentPost(
+                    cash_account_id=values.cash.id,
+                    receivable_account_id=values.receivable.id,
+                ),
+            )
+
+        posted = service.post_payment(
+            payment.id,
+            PaymentPost(
+                cash_account_id=values.cash.id,
+                receivable_account_id=values.receivable.id,
+                customer_credit_account_id=values.customer_credit.id,
+            ),
+        )
+        assert posted.sayad_id == "OPTIONAL-SAYAD"
+        assert posted.journal is not None
+        debits = {line.account_id: line.debit for line in posted.journal.lines if line.debit > 0}
+        credits = {
+            line.account_id: line.credit for line in posted.journal.lines if line.credit > 0
+        }
+        assert debits == {values.cash.id: Decimal("300.00")}
+        assert credits == {
+            values.receivable.id: Decimal("275.00"),
+            values.customer_credit.id: Decimal("25.00"),
+        }
+        assert sum(debits.values()) == sum(credits.values())
+        assert invoice.status == "PAID" and invoice.balance_due == 0
 
 
 def test_payment_post_locks_payment_and_invoice_rows_before_allocation() -> None:
@@ -713,15 +928,15 @@ def test_period_account_mutation_and_journal_post_use_row_locks() -> None:
         event.remove(engine, "before_execute", record_lock)
 
 
-def test_payment_overallocation_invalid_sum_and_cancelled_invoice_fail() -> None:
+def test_payment_overallocation_and_cancelled_invoice_fail() -> None:
     with SessionLocal() as session:
         service, values = domain(session)
         invoice = post_invoice(service, values)
         with pytest.raises(AccountingError, match="balance"):
             service.create_payment(payment_data(values, invoice, Decimal("300"), "P-1"))
-        invalid = payment_data(values, invoice, Decimal("100"), "P-2")
-        invalid.allocations[0].amount = Decimal("50")
-        with pytest.raises(AccountingError, match="equal"):
+        invalid = payment_data(values, invoice, Decimal("50"), "P-2")
+        invalid.allocations[0].amount = Decimal("100")
+        with pytest.raises(AccountingError, match="cannot exceed"):
             service.create_payment(invalid)
         invoice.status = "CANCELLED"
         session.commit()
@@ -793,9 +1008,11 @@ def test_bill_issue_rejects_zero_closed_period_and_wrong_or_duplicate_roles() ->
 
         bill = service.create_bill(bill_data(values, "B-ROLE"))
         generic_expense = Account(
+            owner_id=values.admin.id,
             code="5099", name="Generic expense", category=values.expense.category
         )
         generic_liability = Account(
+            owner_id=values.admin.id,
             code="2199", name="Generic liability", category=values.payable.category
         )
         session.add_all([generic_expense, generic_liability])
@@ -895,6 +1112,7 @@ def test_bill_payment_rejects_overallocation_invalid_sum_and_wrong_payable() -> 
             bill_payment_data(values, bill, Decimal("100"), "BP-WRONG")
         )
         other_payable = Account(
+            owner_id=values.admin.id,
             code="2099",
             name="Other payable",
             category=values.payable.category,

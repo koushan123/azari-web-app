@@ -54,15 +54,24 @@ class MLRepository:
         self.session.add(prediction)
         return prediction
 
-    def prediction(self, prediction_id: UUID) -> MLPrediction | None:
+    def prediction(self, prediction_id: UUID, owner_id: UUID) -> MLPrediction | None:
         return self.session.scalar(
             select(MLPrediction)
             .options(selectinload(MLPrediction.feedback))
-            .where(MLPrediction.id == prediction_id)
+            .where(
+                MLPrediction.id == prediction_id,
+                MLPrediction.requested_by_id == owner_id,
+            )
         )
 
-    def predictions(self, pipeline: str | None = None) -> list[MLPrediction]:
-        statement = select(MLPrediction).options(selectinload(MLPrediction.feedback))
+    def predictions(
+        self, owner_id: UUID, pipeline: str | None = None
+    ) -> list[MLPrediction]:
+        statement = (
+            select(MLPrediction)
+            .options(selectinload(MLPrediction.feedback))
+            .where(MLPrediction.requested_by_id == owner_id)
+        )
         if pipeline is not None:
             statement = statement.where(MLPrediction.pipeline == pipeline)
         return list(self.session.scalars(statement.order_by(MLPrediction.predicted_at.desc())))
@@ -71,17 +80,22 @@ class MLRepository:
         self.session.add(feedback)
         return feedback
 
-    def invoice(self, invoice_id: UUID) -> Invoice | None:
+    def invoice(self, invoice_id: UUID, owner_id: UUID) -> Invoice | None:
         return self.session.scalar(
-            select(Invoice).options(selectinload(Invoice.customer)).where(Invoice.id == invoice_id)
+            select(Invoice)
+            .options(selectinload(Invoice.customer))
+            .where(Invoice.id == invoice_id, Invoice.owner_id == owner_id)
         )
 
-    def customer_invoices(self, customer_id: UUID, as_of: date) -> list[Invoice]:
+    def customer_invoices(
+        self, customer_id: UUID, as_of: date, owner_id: UUID
+    ) -> list[Invoice]:
         return list(
             self.session.scalars(
                 select(Invoice)
                 .where(
                     Invoice.customer_id == customer_id,
+                    Invoice.owner_id == owner_id,
                     Invoice.issue_date <= as_of,
                     Invoice.status.in_(("ISSUED", "PARTIALLY_PAID", "PAID")),
                 )
@@ -89,28 +103,39 @@ class MLRepository:
             )
         )
 
-    def posted_allocations(self, as_of: date) -> list[tuple[PaymentAllocation, Payment]]:
+    def posted_allocations(
+        self, as_of: date, owner_id: UUID
+    ) -> list[tuple[PaymentAllocation, Payment]]:
         return list(
             self.session.execute(
                 select(PaymentAllocation, Payment)
                 .join(Payment)
-                .where(Payment.status == "POSTED", Payment.payment_date <= as_of)
+                .where(
+                    Payment.owner_id == owner_id,
+                    Payment.status == "POSTED",
+                    Payment.payment_date <= as_of,
+                )
             ).tuples()
         )
 
-    def posted_payments(self, as_of: date) -> list[Payment]:
+    def posted_payments(self, as_of: date, owner_id: UUID) -> list[Payment]:
         return list(
             self.session.scalars(
                 select(Payment)
-                .where(Payment.status == "POSTED", Payment.payment_date <= as_of)
+                .where(
+                    Payment.owner_id == owner_id,
+                    Payment.status == "POSTED",
+                    Payment.payment_date <= as_of,
+                )
                 .order_by(Payment.payment_date)
             )
         )
 
-    def customer(self, customer_id: UUID) -> Party | None:
+    def customer(self, customer_id: UUID, owner_id: UUID) -> Party | None:
         return self.session.scalar(
             select(Party).where(
                 Party.id == customer_id,
+                Party.owner_id == owner_id,
                 Party.is_customer.is_(True),
                 Party.is_active.is_(True),
             )

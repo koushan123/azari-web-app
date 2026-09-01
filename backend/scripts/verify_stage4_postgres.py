@@ -61,7 +61,7 @@ def main() -> None:
                 )
             )
             accounting.post_journal(journal.id)
-        reports = ReportingService(session)
+        reports = ReportingService(session, actor.id)
         trial = reports.trial_balance(date(2026, 4, 1), date(2026, 4, 30))
         income = reports.income_statement(date(2026, 4, 1), date(2026, 4, 30))
         assert trial.balanced and trial.total_debit == Decimal("290.35")

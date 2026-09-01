@@ -37,6 +37,23 @@ def test_stage_two_tables_and_constraints_exist() -> None:
         item["name"] == "uq_invoice_checks_sayad_id"
         for item in inspector.get_unique_constraints("invoice_checks")
     )
+    invoice_check_sayad = next(
+        column for column in inspector.get_columns("invoice_checks")
+        if column["name"] == "sayad_id"
+    )
+    assert invoice_check_sayad["nullable"]
+    assert {"sayad_id", "customer_credit_account_id"} <= {
+        column["name"] for column in inspector.get_columns("payments")
+    }
+    assert "sayad_id" in {
+        column["name"] for column in inspector.get_columns("bill_payments")
+    }
+    posting_role_constraint = next(
+        item
+        for item in inspector.get_check_constraints("accounts")
+        if item["name"] == "ck_accounts_valid_posting_role"
+    )
+    assert "CUSTOMER_CREDIT" in posting_role_constraint["sqltext"]
 
 
 def test_rbac_bootstrap_is_idempotent() -> None:

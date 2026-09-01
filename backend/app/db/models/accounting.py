@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from backend.app.db.base import Base, OwnedMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from backend.app.db.models.identity import User
@@ -25,7 +25,7 @@ MONEY = Numeric(18, 2)
 QUANTITY = Numeric(18, 4)
 
 
-class Party(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Party(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "parties"
     __table_args__ = (CheckConstraint("is_customer OR is_supplier", name="has_role"),)
 
@@ -38,10 +38,10 @@ class Party(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
-class Product(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Product(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "products"
     __table_args__ = (
-        UniqueConstraint("sku", name="uq_products_sku"),
+        UniqueConstraint("owner_id", "sku", name="uq_products_sku"),
         CheckConstraint("unit_price >= 0", name="nonnegative_price"),
     )
 
@@ -53,10 +53,10 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
-class AccountCategory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class AccountCategory(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "account_categories"
     __table_args__ = (
-        UniqueConstraint("name", name="uq_account_categories_name"),
+        UniqueConstraint("owner_id", "name", name="uq_account_categories_name"),
         CheckConstraint(
             "account_type IN ('ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE')",
             name="valid_type",
@@ -68,14 +68,14 @@ class AccountCategory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     accounts: Mapped[list["Account"]] = relationship(back_populates="category")
 
 
-class Account(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Account(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "accounts"
     __table_args__ = (
-        UniqueConstraint("code", name="uq_accounts_code"),
+        UniqueConstraint("owner_id", "code", name="uq_accounts_code"),
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
         CheckConstraint(
             "posting_role IN ('GENERAL','CASH','RECEIVABLE','REVENUE','TAX_LIABILITY',"
-            "'PAYABLE','EXPENSE')",
+            "'PAYABLE','EXPENSE','CUSTOMER_CREDIT')",
             name="valid_posting_role",
         ),
     )
@@ -92,10 +92,10 @@ class Account(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     parent: Mapped["Account | None"] = relationship(remote_side="Account.id")
 
 
-class FinancialPeriod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class FinancialPeriod(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "financial_periods"
     __table_args__ = (
-        UniqueConstraint("name", name="uq_financial_periods_name"),
+        UniqueConstraint("owner_id", "name", name="uq_financial_periods_name"),
         CheckConstraint("start_date <= end_date", name="valid_dates"),
         CheckConstraint("status IN ('OPEN','CLOSED')", name="valid_status"),
     )
@@ -106,10 +106,10 @@ class FinancialPeriod(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(10), default="OPEN", server_default="OPEN")
 
 
-class JournalEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class JournalEntry(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "journal_entries"
     __table_args__ = (
-        UniqueConstraint("entry_number", name="uq_journal_entries_entry_number"),
+        UniqueConstraint("owner_id", "entry_number", name="uq_journal_entries_entry_number"),
         CheckConstraint("status IN ('DRAFT','POSTED','CANCELLED')", name="valid_status"),
         Index("ix_journal_entries_status_entry_date", "status", "entry_date"),
     )
@@ -124,7 +124,7 @@ class JournalEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("journal_entries.id", ondelete="RESTRICT"), unique=True
     )
     period: Mapped[FinancialPeriod] = relationship()
-    created_by: Mapped["User | None"] = relationship()
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
     lines: Mapped[list["JournalLine"]] = relationship(
         back_populates="journal", cascade="all, delete-orphan", order_by="JournalLine.id"
     )
@@ -150,10 +150,10 @@ class JournalLine(UUIDPrimaryKeyMixin, Base):
     account: Mapped[Account] = relationship()
 
 
-class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "invoices"
     __table_args__ = (
-        UniqueConstraint("invoice_number", name="uq_invoices_invoice_number"),
+        UniqueConstraint("owner_id", "invoice_number", name="uq_invoices_invoice_number"),
         CheckConstraint("issue_date <= due_date", name="valid_dates"),
         CheckConstraint(
             "subtotal >= 0 AND tax >= 0 AND total >= 0 AND amount_paid >= 0",
@@ -219,10 +219,10 @@ class InvoiceItem(UUIDPrimaryKeyMixin, Base):
     product: Mapped[Product | None] = relationship()
 
 
-class InvoiceCheck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class InvoiceCheck(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "invoice_checks"
     __table_args__ = (
-        UniqueConstraint("sayad_id", name="uq_invoice_checks_sayad_id"),
+        UniqueConstraint("owner_id", "sayad_id", name="uq_invoice_checks_sayad_id"),
         CheckConstraint("amount > 0", name="positive_amount"),
         CheckConstraint(
             "status IN ('PENDING','CLEARED','BOUNCED')", name="valid_status"
@@ -235,7 +235,7 @@ class InvoiceCheck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("invoices.id", ondelete="CASCADE")
     )
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
-    sayad_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    sayad_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(
         String(12), default="PENDING", server_default="PENDING", nullable=False
@@ -250,10 +250,10 @@ class InvoiceCheck(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
 
-class Bill(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Bill(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "bills"
     __table_args__ = (
-        UniqueConstraint("bill_number", name="uq_bills_bill_number"),
+        UniqueConstraint("owner_id", "bill_number", name="uq_bills_bill_number"),
         CheckConstraint("issue_date <= due_date", name="valid_dates"),
         CheckConstraint(
             "subtotal >= 0 AND tax >= 0 AND total >= 0 AND amount_paid >= 0",
@@ -310,10 +310,10 @@ class BillItem(UUIDPrimaryKeyMixin, Base):
     product: Mapped[Product | None] = relationship()
 
 
-class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class Payment(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "payments"
     __table_args__ = (
-        UniqueConstraint("reference", name="uq_payments_reference"),
+        UniqueConstraint("owner_id", "reference", name="uq_payments_reference"),
         CheckConstraint("amount > 0", name="positive_amount"),
         CheckConstraint("status IN ('DRAFT','POSTED','CANCELLED')", name="valid_status"),
         Index("ix_payments_party_payment_date", "party_id", "payment_date"),
@@ -325,6 +325,10 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     reference: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     method: Mapped[str] = mapped_column(String(50), nullable=False)
+    sayad_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    customer_credit_account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(12), default="DRAFT", server_default="DRAFT")
     journal_id: Mapped[UUID | None] = mapped_column(ForeignKey("journal_entries.id"), unique=True)
     party: Mapped[Party] = relationship()
@@ -349,10 +353,10 @@ class PaymentAllocation(UUIDPrimaryKeyMixin, Base):
     invoice: Mapped[Invoice] = relationship()
 
 
-class BillPayment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class BillPayment(UUIDPrimaryKeyMixin, TimestampMixin, OwnedMixin, Base):
     __tablename__ = "bill_payments"
     __table_args__ = (
-        UniqueConstraint("reference", name="uq_bill_payments_reference"),
+        UniqueConstraint("owner_id", "reference", name="uq_bill_payments_reference"),
         CheckConstraint("amount > 0", name="positive_amount"),
         CheckConstraint("status IN ('DRAFT','POSTED','CANCELLED')", name="valid_status"),
         Index("ix_bill_payments_party_payment_date", "party_id", "payment_date"),
@@ -364,6 +368,7 @@ class BillPayment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     reference: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     method: Mapped[str] = mapped_column(String(50), nullable=False)
+    sayad_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(12), default="DRAFT", server_default="DRAFT")
     journal_id: Mapped[UUID | None] = mapped_column(ForeignKey("journal_entries.id"), unique=True)
     party: Mapped[Party] = relationship()

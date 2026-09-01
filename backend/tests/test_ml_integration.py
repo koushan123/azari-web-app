@@ -73,12 +73,15 @@ def register_all(service: MLService, actor: User) -> dict[str, MLModelVersion]:
     return records
 
 
-def accounting_history() -> tuple[Party, Invoice]:
+def accounting_history(owner_email: str) -> tuple[Party, Invoice]:
     with SessionLocal.begin() as session:
-        party = Party(name="ML Customer", is_customer=True)
+        owner = session.scalar(select(User).where(User.email == owner_email))
+        assert owner is not None
+        party = Party(owner_id=owner.id, name="ML Customer", is_customer=True)
         session.add(party)
         session.flush()
         first = Invoice(
+            owner_id=owner.id,
             invoice_number="ML-I-1",
             customer_id=party.id,
             issue_date=date(2026, 1, 1),
@@ -90,6 +93,7 @@ def accounting_history() -> tuple[Party, Invoice]:
             amount_paid=Decimal("100"),
         )
         current = Invoice(
+            owner_id=owner.id,
             invoice_number="ML-I-2",
             customer_id=party.id,
             issue_date=date(2026, 2, 1),
@@ -101,6 +105,7 @@ def accounting_history() -> tuple[Party, Invoice]:
             amount_paid=Decimal("0"),
         )
         payment = Payment(
+            owner_id=owner.id,
             party_id=party.id,
             payment_date=date(2026, 1, 20),
             amount=Decimal("100"),
@@ -256,9 +261,10 @@ def test_model_cache_loads_an_active_artifact_once(
 
 
 def test_all_four_predictions_persist_use_real_history_and_feedback() -> None:
-    party, invoice = accounting_history()
+    owner = add_user("ADMIN", "predictions@example.com")
+    party, invoice = accounting_history("predictions@example.com")
     with SessionLocal() as session:
-        actor = session.merge(add_user("ADMIN", "predictions@example.com"))
+        actor = session.merge(owner)
         service = MLService(session, get_settings())
         register_all(service, actor)
         transaction, transaction_value = service.classify_transaction(
@@ -273,7 +279,7 @@ def test_all_four_predictions_persist_use_real_history_and_feedback() -> None:
         assert risk.confidence is not None and risk.source_id == str(invoice.id)
         assert len(points) == 7 and forecast.predicted_value["as_of"] == "2026-02-10"
         assert "customers" in segment_value["behavioral_description"]
-        assert len(service.predictions()) == 4
+        assert len(service.predictions(actor)) == 4
 
         first = service.submit_feedback(
             transaction.id,
@@ -310,11 +316,16 @@ def test_application_confidence_threshold_controls_manual_review() -> None:
 
 
 def test_payment_and_cash_flow_as_of_boundaries_exclude_future_data() -> None:
-    party, invoice = accounting_history()
+    owner = add_user("ADMIN", "boundaries@example.com")
+    party, invoice = accounting_history("boundaries@example.com")
     with SessionLocal() as session:
         service = MLService(session, get_settings())
-        before = service._payment_features(invoice.id, party.id, 250.0, date(2026, 2, 10))
+        actor = session.merge(owner)
+        before = service._payment_features(
+            invoice.id, party.id, 250.0, date(2026, 2, 10), actor.id
+        )
         future = Payment(
+            owner_id=actor.id,
             party_id=party.id,
             payment_date=date(2026, 3, 1),
             amount=Decimal("50"),
@@ -326,11 +337,13 @@ def test_payment_and_cash_flow_as_of_boundaries_exclude_future_data() -> None:
         session.flush()
         session.add(PaymentAllocation(payment_id=future.id, invoice_id=invoice.id, amount=50))
         session.commit()
-        after = service._payment_features(invoice.id, party.id, 250.0, date(2026, 2, 10))
+        after = service._payment_features(
+            invoice.id, party.id, 250.0, date(2026, 2, 10), actor.id
+        )
         assert before == after
         assert all(
             payment.payment_date <= date(2026, 2, 10)
-            for payment in service.repo.posted_payments(date(2026, 2, 10))
+            for payment in service.repo.posted_payments(date(2026, 2, 10), actor.id)
         )
 
 
@@ -409,9 +422,10 @@ def test_ml_rejects_blank_classification_and_draft_payment_risk() -> None:
     with pytest.raises(ValueError):
         TransactionClassifyRequest(description="   ")
 
-    party, invoice = accounting_history()
+    owner = add_user("ADMIN", "draft-risk@example.com")
+    party, invoice = accounting_history("draft-risk@example.com")
     with SessionLocal() as session:
-        actor = session.merge(add_user("ADMIN", "draft-risk@example.com"))
+        actor = session.merge(owner)
         current = session.get(Invoice, invoice.id)
         assert current is not None
         current.status = "DRAFT"
@@ -422,8 +436,8 @@ def test_ml_rejects_blank_classification_and_draft_payment_risk() -> None:
 
 
 def test_all_pipeline_api_response_shapes_and_feedback_permission(client: TestClient) -> None:
-    party, invoice = accounting_history()
     admin = headers_for(client, "ADMIN", "ml-api-all@example.com")
+    party, invoice = accounting_history("ml-api-all@example.com")
     viewer = headers_for(client, "VIEWER", "ml-feedback-viewer@example.com")
     identifiers = {
         "transaction_classification": "transaction/transaction-v1",

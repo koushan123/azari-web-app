@@ -10,14 +10,26 @@ ModelT = TypeVar("ModelT", bound=Base)
 
 
 class AccountingRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, owner_id: UUID) -> None:
         self.session = session
+        self.owner_id = owner_id
 
     def get(self, model: type[ModelT], item_id: UUID) -> ModelT | None:
-        return self.session.get(model, item_id)
+        return self.session.scalar(
+            select(model).where(
+                model.id == item_id,  # type: ignore[attr-defined]
+                model.owner_id == self.owner_id,  # type: ignore[attr-defined]
+            )
+        )
 
     def list(self, model: type[ModelT]) -> list[ModelT]:
-        return list(self.session.scalars(select(model).order_by(model.created_at)))  # type: ignore[attr-defined]
+        return list(
+            self.session.scalars(
+                select(model)
+                .where(model.owner_id == self.owner_id)  # type: ignore[attr-defined]
+                .order_by(model.created_at)  # type: ignore[attr-defined]
+            )
+        )
 
     def add(self, item: ModelT) -> ModelT:
         self.session.add(item)

@@ -199,6 +199,7 @@ function BillCreate({
   return (
     <Modal open={open} title="صورتحساب خرید جدید" onClose={close} wide>
       <form className="form" onSubmit={submit}>
+        <p className="form-description">اطلاعات خرید و بدهی ایجادشده برای تأمین‌کننده را ثبت کنید.</p>
         {error && <div className="alert alert--error">{error}</div>}
         {activeSuppliers.length === 0 && (
           <PrerequisiteNotice to="/parties" linkLabel="ثبت طرف حساب">
@@ -247,6 +248,7 @@ function BillDetail({ item, parties, close }: { item: Bill | null; parties: Part
   return (
     <DetailModal open={Boolean(item)} title={`صورتحساب ${item?.bill_number ?? ""}`} close={close}>
       {item && <>
+        <p className="form-description">جزئیات خرید، مبلغ بدهی و وضعیت پرداخت این صورتحساب را مشاهده کنید.</p>
         <div className="detail-summary">
           <span>تأمین‌کننده <strong>{parties.find((party) => party.id === item.supplier_id)?.name}</strong></span>
           <span>صدور <DateText value={item.issue_date} /></span>
@@ -273,7 +275,7 @@ function BillIssue({ item, accounts, close, saved }: { item: Bill | null; accoun
     const expense = String(form.get("expense"));
     const payable = String(form.get("payable"));
     if (expense === payable) {
-      setError("حساب هزینه و حساب پرداختنی باید متفاوت باشند.");
+      setError("حساب خرید و حساب پرداختنی باید متفاوت باشند.");
       return;
     }
     setBusy(true);
@@ -293,10 +295,11 @@ function BillIssue({ item, accounts, close, saved }: { item: Bill | null; accoun
   return (
     <Modal open={Boolean(item)} title="صدور نهایی صورتحساب خرید" onClose={close}>
       <form className="form" onSubmit={submit}>
+        <p className="form-description">با صدور نهایی، مبلغ خرید در حساب هزینه و بدهی تأمین‌کننده در حساب پرداختنی ثبت می‌شود.</p>
         {error && <div className="alert alert--error">{error}</div>}
         {!ready && <PrerequisiteNotice to="/accounts" linkLabel="مدیریت حساب‌ها">ابتدا حساب‌های فعال با نقش هزینه و پرداختنی ثبت کنید.</PrerequisiteNotice>}
         <div className="alert alert--warning">صدور نهایی یک سند حسابداری ایجاد می‌کند و صورتحساب پس از آن قابل ویرایش نیست.</div>
-        <Field label="حساب هزینه"><select name="expense" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{expenseAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field>
+        <Field label="حساب خرید"><select name="expense" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{expenseAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field>
         <Field label="حساب پرداختنی"><select name="payable" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{payableAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field>
         <div className="form-actions"><button type="button" className="button button--secondary" onClick={close} disabled={busy}>انصراف</button><button className="button button--danger" disabled={!ready || busy}>{busy ? "در حال صدور…" : "صدور نهایی"}</button></div>
       </form>
@@ -334,6 +337,7 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
   const openBills = data?.bills.filter((bill) => ["ISSUED", "PARTIALLY_PAID"].includes(bill.status)) ?? [];
   const [party, setParty] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayIso());
+  const [method, setMethod] = useState("انتقال بانکی");
   const [allocations, setAllocations] = useState<BillPaymentAllocation[]>([{ bill_id: "", amount: "0" }]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -356,7 +360,8 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
         payment_date: paymentDate,
         amount: String(form.get("amount")),
         reference: String(form.get("reference")),
-        method: String(form.get("method")),
+        method,
+        sayad_id: method === "چک" ? String(form.get("sayadId")) || null : null,
         allocations,
       });
       saved();
@@ -369,6 +374,7 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
   return (
     <Modal open={open} title="ثبت پرداخت به تأمین‌کننده" onClose={close} wide>
       <form className="form" onSubmit={submit}>
+        <p className="form-description">پرداخت تأمین‌کننده را ثبت و مبلغ آن را به صورتحساب‌های خرید تخصیص دهید.</p>
         {error && <div className="alert alert--error">{error}</div>}
         {activeSuppliers.length === 0 && <PrerequisiteNotice to="/parties" linkLabel="ثبت طرف حساب">ابتدا باید حداقل یک تأمین‌کننده فعال ثبت کنید.</PrerequisiteNotice>}
         {activeSuppliers.length > 0 && openBills.length === 0 && <PrerequisiteNotice to="/bills" linkLabel="مدیریت صورتحساب‌ها">ابتدا باید حداقل یک صورتحساب خرید صادرشده با مانده قابل پرداخت داشته باشید.</PrerequisiteNotice>}
@@ -378,7 +384,8 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
           <DateField label="تاریخ پرداخت" value={paymentDate} onChange={setPaymentDate} required />
           <Field label="مبلغ پرداخت (ریال)"><MoneyInput name="amount" min="0.01" required disabled={busy} /></Field>
           <Field label="شماره مرجع"><input name="reference" dir="ltr" required disabled={busy} /></Field>
-          <Field label="روش پرداخت"><select name="method" disabled={busy}><option>انتقال بانکی</option><option>کارت‌خوان</option><option>نقدی</option><option>چک</option></select></Field>
+          <Field label="روش پرداخت"><select value={method} onChange={(event) => setMethod(event.target.value)} disabled={busy}><option>انتقال بانکی</option><option>کارت‌خوان</option><option>نقدی</option><option>چک</option></select></Field>
+          {method === "چک" && <Field label="شناسه صیادی (اختیاری)"><input name="sayadId" dir="ltr" maxLength={100} disabled={busy} /></Field>}
         </div>
         <h3>تخصیص به صورتحساب‌ها</h3>
         {allocations.map((allocation, index) => <div className="allocation-row" key={index}><Field label="صورتحساب"><select value={allocation.bill_id} onChange={(event) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, bill_id: event.target.value } : item))} required disabled={party === "" || eligible.length === 0 || busy}><option value="">انتخاب صورتحساب</option>{eligible.map((bill) => <option key={bill.id} value={bill.id}>{bill.bill_number} · مانده {formatMoney(bill.balance_due)}</option>)}</select></Field><Field label="مبلغ تخصیص"><MoneyInput min="0.01" value={allocation.amount} onValueChange={(value) => setAllocations((old) => old.map((item, i) => i === index ? { ...item, amount: value } : item))} required disabled={busy} /></Field><button type="button" className="icon-button" disabled={allocations.length === 1 || busy} onClick={() => setAllocations((old) => old.filter((_, i) => i !== index))}>×</button></div>)}
@@ -391,7 +398,7 @@ function BillPaymentCreate({ open, data, close, saved }: { open: boolean; data: 
 }
 
 function BillPaymentDetail({ item, bills, close }: { item: BillPayment | null; bills: Bill[]; close: () => void }) {
-  return <DetailModal open={Boolean(item)} title={`پرداخت ${item?.reference ?? ""}`} close={close}>{item && <><div className="detail-summary"><span>تاریخ <DateText value={item.payment_date} /></span><span>روش <strong>{paymentMethodLabel(item.method)}</strong></span><span>مبلغ <Money value={item.amount} /></span><StatusBadge value={item.status} /></div><h3>تخصیص‌ها</h3><div className="compact-list">{item.allocations.map((allocation, index) => <div key={allocation.id ?? index}><span>صورتحساب {bills.find((bill) => bill.id === allocation.bill_id)?.bill_number ?? allocation.bill_id}</span><Money value={allocation.amount} /></div>)}</div></>}</DetailModal>;
+  return <DetailModal open={Boolean(item)} title={`پرداخت ${item?.reference ?? ""}`} close={close}>{item && <><p className="form-description">جزئیات پرداخت و نحوه تخصیص آن به صورتحساب‌های تأمین‌کننده را مشاهده کنید.</p><div className="detail-summary"><span>تاریخ <DateText value={item.payment_date} /></span><span>روش <strong>{paymentMethodLabel(item.method)}</strong></span>{item.sayad_id && <span>شناسه صیادی <strong dir="ltr">{item.sayad_id}</strong></span>}<span>مبلغ <Money value={item.amount} /></span><StatusBadge value={item.status} /></div><h3>تخصیص‌ها</h3><div className="compact-list">{item.allocations.map((allocation, index) => <div key={allocation.id ?? index}><span>صورتحساب {bills.find((bill) => bill.id === allocation.bill_id)?.bill_number ?? allocation.bill_id}</span><Money value={allocation.amount} /></div>)}</div></>}</DetailModal>;
 }
 
 function BillPaymentPost({ item, accounts, close, saved }: { item: BillPayment | null; accounts: Account[]; close: () => void; saved: () => void }) {
@@ -424,5 +431,5 @@ function BillPaymentPost({ item, accounts, close, saved }: { item: BillPayment |
       setBusy(false);
     }
   };
-  return <Modal open={Boolean(item)} title="ثبت نهایی پرداخت تأمین‌کننده" onClose={close}><form className="form" onSubmit={submit}>{error && <div className="alert alert--error">{error}</div>}{!ready && <PrerequisiteNotice to="/accounts" linkLabel="مدیریت حساب‌ها">ابتدا حساب‌های فعال با نقش نقد/بانک و پرداختنی ثبت کنید.</PrerequisiteNotice>}<div className="alert alert--warning">ثبت نهایی پرداخت یک سند حسابداری ایجاد می‌کند و قابل بازگشت به پیش‌نویس نیست.</div><Field label="حساب نقد/بانک"><select name="cash" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field><Field label="حساب پرداختنی"><select name="payable" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{payableAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field><div className="form-actions"><button type="button" className="button button--secondary" onClick={close} disabled={busy}>انصراف</button><button className="button button--danger" disabled={!ready || busy}>{busy ? "در حال ثبت…" : "ثبت نهایی"}</button></div></form></Modal>;
+  return <Modal open={Boolean(item)} title="ثبت نهایی پرداخت تأمین‌کننده" onClose={close}><form className="form" onSubmit={submit}><p className="form-description">با ثبت نهایی، بدهی تأمین‌کننده کاهش و خروج وجه از حساب نقد/بانک ثبت می‌شود.</p>{error && <div className="alert alert--error">{error}</div>}{!ready && <PrerequisiteNotice to="/accounts" linkLabel="مدیریت حساب‌ها">ابتدا حساب‌های فعال با نقش نقد/بانک و پرداختنی ثبت کنید.</PrerequisiteNotice>}<div className="alert alert--warning">ثبت نهایی پرداخت یک سند حسابداری ایجاد می‌کند و قابل بازگشت به پیش‌نویس نیست.</div><Field label="حساب نقد/بانک"><select name="cash" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field><Field label="حساب پرداختنی"><select name="payable" required disabled={!ready || busy}><option value="">انتخاب کنید</option>{payableAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></Field><div className="form-actions"><button type="button" className="button button--secondary" onClick={close} disabled={busy}>انصراف</button><button className="button button--danger" disabled={!ready || busy}>{busy ? "در حال ثبت…" : "ثبت نهایی"}</button></div></form></Modal>;
 }
