@@ -1,6 +1,7 @@
 from typing import cast
 
 from backend.app.core.passwords import hash_password
+from backend.app.db.bootstrap import PERMISSIONS
 from backend.app.db.database import SessionLocal
 from backend.app.db.models import AuditEvent, User
 from fastapi.testclient import TestClient
@@ -29,7 +30,7 @@ def login(
     )
 
 
-def test_registration_normalizes_email_assigns_admin_and_hides_password(
+def test_registration_normalizes_email_assigns_owner_and_hides_password(
     client: TestClient,
 ) -> None:
     response = register(client)
@@ -38,9 +39,11 @@ def test_registration_normalizes_email_assigns_admin_and_hides_password(
     assert body["email"] == "alice@example.com"
     assert body["phone_number"] is None
     assert body["plan_status"] == "FREE"
-    assert body["roles"] == ["ADMIN"]
+    assert body["roles"] == ["OWNER"]
     assert "invoices:write" in body["permissions"]
-    assert "users:manage" in body["permissions"]
+    assert set(body["permissions"]) == {
+        permission for permission in PERMISSIONS if not permission.startswith("users:")
+    }
     assert "password" not in body
     assert "password_hash" not in body
 
@@ -223,12 +226,31 @@ def test_missing_malformed_and_inactive_tokens_are_unauthorized(client: TestClie
     )
 
 
-def test_registered_admin_can_access_user_management(client: TestClient) -> None:
+def test_registered_owner_cannot_access_user_management(client: TestClient) -> None:
     register(client)
     token = login(client).json()["access_token"]
-    authorized = client.get("/api/v1/users", headers={"Authorization": f"Bearer {token}"})
-    assert authorized.status_code == 200
-    assert authorized.json()[0]["email"] == "alice@example.com"
+    headers = {"Authorization": f"Bearer {token}"}
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.email == "alice@example.com"))
+        assert user is not None
+        user_id = user.id
+    assert client.get("/api/v1/users", headers=headers).status_code == 403
+    assert (
+        client.patch(
+            f"/api/v1/users/{user_id}/roles",
+            headers=headers,
+            json={"roles": ["ADMIN"]},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/users/{user_id}/status",
+            headers=headers,
+            json={"is_active": False},
+        ).status_code
+        == 403
+    )
 
 
 def test_user_with_no_roles_has_no_permissions(client: TestClient) -> None:

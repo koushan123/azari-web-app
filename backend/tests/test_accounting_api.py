@@ -32,6 +32,24 @@ def admin_headers(client: TestClient) -> dict[str, str]:
     return headers_for_admin(client)
 
 
+def registered_owner_headers(client: TestClient) -> dict[str, str]:
+    credentials = {
+        "email": "workspace-owner@example.com",
+        "password": "workspace-owner-password-123",
+        "first_name": "Workspace",
+        "last_name": "Owner",
+    }
+    response = client.post("/api/v1/auth/register", json=credentials)
+    assert response.status_code == 201
+    assert response.json()["roles"] == ["OWNER"]
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": credentials["email"], "password": credentials["password"]},
+    )
+    assert login.status_code == 200
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
 def test_registered_users_have_private_accounting_workspaces(client: TestClient) -> None:
     first = headers_for_admin(client, "owner-one@example.com")
     second = headers_for_admin(client, "owner-two@example.com")
@@ -116,7 +134,7 @@ def test_accounting_api_requires_authentication_and_permission(client: TestClien
 
 
 def test_accounting_api_crud_post_and_reverse(client: TestClient) -> None:
-    headers = admin_headers(client)
+    headers = registered_owner_headers(client)
     party = client.post(
         "/api/v1/parties",
         headers=headers,
@@ -142,12 +160,32 @@ def test_accounting_api_crud_post_and_reverse(client: TestClient) -> None:
     debit = client.post(
         "/api/v1/accounts",
         headers=headers,
-        json={"code": "API-100", "name": "Cash", "category_id": asset["id"]},
+        json={
+            "code": "API-100",
+            "name": "Cash",
+            "category_id": asset["id"],
+            "posting_role": "CASH",
+        },
+    ).json()
+    receivable = client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={
+            "code": "API-110",
+            "name": "Receivable",
+            "category_id": asset["id"],
+            "posting_role": "RECEIVABLE",
+        },
     ).json()
     credit = client.post(
         "/api/v1/accounts",
         headers=headers,
-        json={"code": "API-400", "name": "Revenue", "category_id": revenue_category["id"]},
+        json={
+            "code": "API-400",
+            "name": "Revenue",
+            "category_id": revenue_category["id"],
+            "posting_role": "REVENUE",
+        },
     ).json()
     period = client.post(
         "/api/v1/periods",
@@ -183,12 +221,43 @@ def test_accounting_api_crud_post_and_reverse(client: TestClient) -> None:
         ).status_code
         == 409
     )
+    invoice = client.post(
+        "/api/v1/invoices",
+        headers=headers,
+        json={
+            "invoice_number": "API-I-1",
+            "customer_id": party.json()["id"],
+            "issue_date": "2026-06-02",
+            "due_date": "2026-06-02",
+            "items": [
+                {
+                    "description": "Owner invoice",
+                    "quantity": "1",
+                    "unit_price": "75",
+                }
+            ],
+        },
+    )
+    assert invoice.status_code == 201, invoice.text
+    issued = client.post(
+        f"/api/v1/invoices/{invoice.json()['id']}/issue",
+        headers=headers,
+        json={
+            "receivable_account_id": receivable["id"],
+            "revenue_account_id": credit["id"],
+        },
+    )
+    assert issued.status_code == 200 and issued.json()["status"] == "ISSUED"
+    report = client.get(
+        "/api/v1/reports/trial-balance?end_date=2026-12-31", headers=headers
+    )
+    assert report.status_code == 200 and report.json()["balanced"] is True
 
 
 def test_supplier_bill_and_payment_api_workflow_and_reversal_protection(
     client: TestClient,
 ) -> None:
-    headers = admin_headers(client)
+    headers = registered_owner_headers(client)
     supplier = client.post(
         "/api/v1/parties",
         headers=headers,

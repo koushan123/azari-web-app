@@ -57,15 +57,17 @@ def test_stage_two_tables_and_constraints_exist() -> None:
 
 
 def test_rbac_bootstrap_is_idempotent() -> None:
-    from backend.app.db.bootstrap import seed_rbac
+    from backend.app.db.bootstrap import PERMISSIONS, seed_rbac
 
     with SessionLocal.begin() as session:
         seed_rbac(session)
         seed_rbac(session)
-        assert len(session.scalars(select(Role)).all()) == 4
-        from backend.app.db.bootstrap import PERMISSIONS
-
+        roles = {role.name: role for role in session.scalars(select(Role)).all()}
+        assert set(roles) == {"ADMIN", "OWNER", "ACCOUNTANT", "MANAGER", "VIEWER"}
         assert len(session.scalars(select(Permission)).all()) == len(PERMISSIONS)
+        assert {permission.name for permission in roles["OWNER"].permissions} == {
+            name for name in PERMISSIONS if not name.startswith("users:")
+        }
 
 
 def test_role_name_database_uniqueness() -> None:

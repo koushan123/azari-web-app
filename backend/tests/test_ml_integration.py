@@ -371,10 +371,10 @@ def test_ml_api_security_management_prediction_history_and_feedback(client: Test
         == 403
     )
 
-    admin = headers_for(client, "ADMIN", "ml-admin@example.com")
+    owner = headers_for(client, "OWNER", "ml-owner@example.com")
     registered = client.post(
         "/api/v1/ml/models/register",
-        headers=admin,
+        headers=owner,
         json={
             "pipeline": "transaction_classification",
             "artifact_identifier": "transaction/transaction-v1",
@@ -382,24 +382,24 @@ def test_ml_api_security_management_prediction_history_and_feedback(client: Test
     )
     assert registered.status_code == 201
     assert "artifact_identifier" not in registered.json()
-    activated = client.post(f"/api/v1/ml/models/{registered.json()['id']}/activate", headers=admin)
+    activated = client.post(f"/api/v1/ml/models/{registered.json()['id']}/activate", headers=owner)
     assert activated.status_code == 200 and activated.json()["is_active"]
     predicted = client.post(
         "/api/v1/ml/transactions/classify",
-        headers=admin,
+        headers=owner,
         json={"description": "metro hotel booking business"},
     )
     assert predicted.status_code == 200
     prediction_id = predicted.json()["prediction_id"]
-    history = client.get("/api/v1/ml/predictions", headers=admin)
+    history = client.get("/api/v1/ml/predictions", headers=owner)
     assert history.status_code == 200 and history.json()[0]["id"] == prediction_id
     feedback = client.post(
         f"/api/v1/ml/predictions/{prediction_id}/feedback",
-        headers=admin,
+        headers=owner,
         json={"feedback_type": "CORRECTION", "actual_value": "travel"},
     )
     assert feedback.status_code == 201
-    assert client.get(f"/api/v1/ml/predictions/{prediction_id}", headers=admin).json()["feedback"]
+    assert client.get(f"/api/v1/ml/predictions/{prediction_id}", headers=owner).json()["feedback"]
 
 
 def test_invalid_feedback_and_no_active_model_are_safe(client: TestClient) -> None:

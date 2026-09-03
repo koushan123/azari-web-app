@@ -5,8 +5,8 @@ import { useAsync } from "../hooks/useAsync";
 import { api, ApiError } from "../services/api";
 import { usePreferences } from "../theme/ThemeContext";
 import type { User } from "../types/api";
-const roleLabels: Record<string, string> = { ADMIN: "مدیر سامانه", ACCOUNTANT: "حسابدار", MANAGER: "مدیر", VIEWER: "مشاهده‌گر" };
-const canonicalRoles = ["ADMIN", "ACCOUNTANT", "MANAGER", "VIEWER"];
+const roleLabels: Record<string, string> = { ADMIN: "مدیر سامانه", OWNER: "مالک فضای کاری", ACCOUNTANT: "حسابدار", MANAGER: "مدیر", VIEWER: "مشاهده‌گر" };
+const canonicalRoles = ["ADMIN", "OWNER", "ACCOUNTANT", "MANAGER", "VIEWER"];
 type PendingChange = { kind: "roles"; user: User; roles: string[] } | { kind: "status"; user: User; isActive: boolean };
 const managementError = (reason: unknown) => reason instanceof ApiError && reason.status === 409 ? "این تغییر امکان‌پذیر نیست؛ سامانه باید همیشه حداقل یک مدیر فعال داشته باشد و مدیر نمی‌تواند حساب خودش را غیرفعال کند." : reason instanceof Error ? reason.message : "تغییر کاربر ناموفق بود.";
 

@@ -45,10 +45,10 @@ Persian version follows it.
   either or both may be supplied. Passwords must contain 12–128 characters.
 - Login accepts either the account's email address or E.164 phone number with
   the password.
-- Registration assigns the existing `ADMIN` role so the new user can use every
-  application feature. The role is server-selected and cannot be overridden by
-  request input. This deliberately makes public registration unsuitable for an
-  internet-exposed multi-user deployment without an additional trust boundary.
+- Registration assigns the server-selected `OWNER` role. It grants every
+  non-user-management permission so the registrant retains full operational
+  control of their private workspace, but it excludes every `users:*`
+  permission and cannot be overridden by request input.
 - After successful registration, the user is logged in and taken to the first
   page their role is allowed to access.
 - Duplicate email or phone number, invalid input, incorrect credentials, expired
@@ -60,8 +60,8 @@ Persian version follows it.
 - Every visible page and action follows backend permissions.
 - The UI hides or disables actions the user cannot perform, but the backend is
   always the final security boundary.
-- A newly registered user receives `ADMIN`, so all permitted write and management
-  actions must be visible immediately.
+- A newly registered user receives `OWNER`, so all accounting, reporting and ML
+  actions are visible immediately while platform user management remains hidden.
 - A forbidden action returns a Persian access message, not a broken or empty
   screen.
 
@@ -274,9 +274,9 @@ The browser must not silently block the form.
   است. واردکردن حداقل یکی از ایمیل یا شماره تلفن الزامی است و کاربر می‌تواند هر
   دو را نیز وارد کند. طول رمز عبور باید بین ۱۲ تا ۱۲۸ نویسه باشد.
 - ورود با ایمیل یا شماره تلفن استاندارد E.164 به‌همراه رمز عبور انجام می‌شود.
-- ثبت‌نام نقش موجود `ADMIN` را به کاربر می‌دهد تا همه قابلیت‌های برنامه در دسترس
-  او باشد. نقش در سرور تعیین می‌شود و از ورودی درخواست قابل تغییر نیست. بنابراین
-  ثبت‌نام عمومی بدون مرز اعتماد اضافی برای انتشار آزاد اینترنتی مناسب نیست.
+- ثبت‌نام نقش `OWNER` را در سرور به کاربر می‌دهد. این نقش همه مجوزهای عملیاتی
+  به‌جز مجوزهای `users:*` را دارد تا کاربر فضای کاری خصوصی خودش را کامل مدیریت
+  کند، اما نتواند کاربران دیگر سامانه را مشاهده یا مدیریت کند.
 - پس از ثبت‌نام موفق، کاربر وارد برنامه می‌شود و به اولین صفحه مجاز هدایت می‌شود.
 - ایمیل یا شماره تلفن تکراری، اطلاعات نامعتبر، رمز اشتباه، پایان نشست و خطای شبکه
   باید با پیام فارسی روشن نمایش داده شوند.
@@ -287,8 +287,8 @@ The browser must not silently block the form.
 - نمایش هر صفحه و عملیات باید مطابق مجوزهای سرور باشد.
 - رابط کاربری عملیات غیرمجاز را مخفی یا غیرفعال می‌کند، اما کنترل نهایی امنیت
   همیشه در سرور باقی می‌ماند.
-- کاربر تازه ثبت‌شده نقش `ADMIN` دارد و همه عملیات نوشتن و مدیریت مجاز باید بلافاصله
-  برای او نمایش داده شوند.
+- کاربر تازه ثبت‌شده نقش `OWNER` دارد؛ همه عملیات حسابداری، گزارش و هوش مصنوعی
+  برای او نمایش داده می‌شوند، اما مدیریت کاربران سامانه نمایش داده نمی‌شود.
 - عملیات غیرمجاز باید پیام فارسی نشان دهد، نه صفحه خالی یا خراب.
 
 ### ۵. راه‌اندازی اولیه و پیش‌نیازها
